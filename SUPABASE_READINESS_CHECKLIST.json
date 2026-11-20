@@ -1,0 +1,297 @@
+{
+  "checkedAt": "2026-11-18T04:58:05.641Z",
+  "projectUrl": "https://jqlxtgueyporvqtrscne.supabase.co",
+  "env": {
+    "NEXT_PUBLIC_SUPABASE_URL": {
+      "required": true,
+      "present": true,
+      "length": 40
+    },
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY": {
+      "required": true,
+      "present": true,
+      "length": 46
+    },
+    "VITE_SUPABASE_URL": {
+      "required": true,
+      "present": true,
+      "length": 40
+    },
+    "VITE_SUPABASE_ANON_KEY": {
+      "required": true,
+      "present": true,
+      "length": 46
+    },
+    "SUPABASE_SERVICE_ROLE_KEY": {
+      "required": false,
+      "present": false,
+      "length": 0
+    },
+    "VITE_GOOGLE_CLIENT_ID": {
+      "required": false,
+      "present": true,
+      "length": 72
+    },
+    "VITE_GOOGLE_AUTH_PROXY": {
+      "required": false,
+      "present": true,
+      "length": 48
+    }
+  },
+  "tables": {
+    "sections": {
+      "ok": true,
+      "count": 10,
+      "min": 1,
+      "purpose": "Categories for CMS + public site"
+    },
+    "articles": {
+      "ok": true,
+      "count": 11,
+      "min": 1,
+      "purpose": "Stories published to news app"
+    },
+    "authors": {
+      "ok": true,
+      "count": 6,
+      "min": 1,
+      "purpose": "Bylines / staff directory authors"
+    },
+    "media_assets": {
+      "ok": true,
+      "count": 0,
+      "min": 0,
+      "purpose": "Uploaded images/video/audio library"
+    },
+    "comments": {
+      "ok": true,
+      "count": 3,
+      "min": 0,
+      "purpose": "Reader comments"
+    },
+    "settings": {
+      "ok": true,
+      "count": 10,
+      "min": 5,
+      "purpose": "crawl, contact, ads_enabled, site_link, etc."
+    },
+    "team_members": {
+      "ok": true,
+      "count": 1,
+      "min": 1,
+      "purpose": "CMS auth roles owner/editor/writer"
+    },
+    "profiles": {
+      "ok": true,
+      "count": 6,
+      "min": 1,
+      "purpose": "Staff directory profiles (email/phone/title)"
+    },
+    "staff_mail": {
+      "ok": true,
+      "count": 1,
+      "min": 0,
+      "purpose": "Per-profile send/receive inbox"
+    },
+    "notifications": {
+      "ok": true,
+      "count": 1,
+      "min": 0,
+      "purpose": "Desk notification records"
+    },
+    "notification_prefs": {
+      "ok": true,
+      "count": 3,
+      "min": 1,
+      "purpose": "Email notification preferences per user"
+    },
+    "ads": {
+      "ok": true,
+      "count": 6,
+      "min": 1,
+      "purpose": "Banner slots + sizes"
+    },
+    "ad_rates": {
+      "ok": true,
+      "count": 6,
+      "min": 1,
+      "purpose": "CPC/CPM rates per ad"
+    },
+    "ad_clicks": {
+      "ok": true,
+      "count": 16,
+      "min": 0,
+      "purpose": "Per-click ad analytics"
+    },
+    "ad_impressions": {
+      "ok": true,
+      "count": 73,
+      "min": 0,
+      "purpose": "Ad impression analytics"
+    },
+    "article_views": {
+      "ok": true,
+      "count": 120,
+      "min": 0,
+      "purpose": "Story read counts"
+    },
+    "page_visits": {
+      "ok": true,
+      "count": 46,
+      "min": 0,
+      "purpose": "Public page visit analytics"
+    }
+  },
+  "relationships": {
+    "comments→articles": {
+      "ok": true,
+      "sample": {
+        "id": 1,
+        "article_id": 1,
+        "articles": {
+          "id": 1,
+          "headline": "Ramaphosa urges unity as cabinet weighs energy reform package"
+        }
+      }
+    },
+    "ad_clicks→ads": {
+      "ok": true,
+      "sample": {
+        "id": 1,
+        "ad_id": 1,
+        "ads": {
+          "id": 1,
+          "slot": "top"
+        }
+      }
+    },
+    "ad_impressions→ads": {
+      "ok": true,
+      "sample": {
+        "id": 1,
+        "ad_id": 1,
+        "ads": {
+          "id": 1,
+          "slot": "top"
+        }
+      }
+    },
+    "ad_rates→ads": {
+      "ok": true,
+      "sample": {
+        "id": 1,
+        "ad_id": 1,
+        "cost_per_click": 1.5,
+        "ads": {
+          "id": 1,
+          "slot_name": "Top banner"
+        }
+      }
+    },
+    "article_views→articles": {
+      "ok": true,
+      "sample": {
+        "id": 1,
+        "article_id": 1,
+        "articles": {
+          "id": 1
+        }
+      }
+    }
+  },
+  "storage": {
+    "ok": true,
+    "bucket": "news-media",
+    "listBuckets": [],
+    "probeError": null
+  },
+  "auth": {
+    "ok": true,
+    "userId": "a802e9f8-27c7-4d70-a77c-1fe5052d322a",
+    "authEmail": "owner@180news.co.za",
+    "team": {
+      "name": "Kabelo Zwelibuyile Hlongwane",
+      "email": "zweli@180news.co.za",
+      "role": "owner"
+    }
+  },
+  "seed": {
+    "publishedArticles": 8,
+    "enabledSections": 10,
+    "adSlots": [
+      "top",
+      "bottom",
+      "mid",
+      "sidebar",
+      "inarticle",
+      "mobile"
+    ],
+    "profilesWithEmail": 6,
+    "settingsKeys": [
+      "crawl",
+      "notice",
+      "elections_update",
+      "comments",
+      "ads_enabled",
+      "live_updates",
+      "homepage",
+      "site_link",
+      "contact",
+      "email_notifications"
+    ]
+  },
+  "rls": {
+    "note": "RLS policies applied via deployment tools for public SELECT on content tables and INSERT on analytics track tables",
+    "expectedPolicies": [
+      "articles SELECT true",
+      "sections SELECT true",
+      "profiles SELECT true",
+      "ads SELECT true",
+      "settings SELECT true",
+      "authors SELECT true",
+      "page_visits INSERT true",
+      "ad_clicks INSERT true",
+      "ad_impressions INSERT true"
+    ],
+    "verifiedViaAnonReads": true
+  },
+  "overall": {
+    "ready": true,
+    "blockers": [],
+    "warnings": [
+      "SUPABASE_SERVICE_ROLE_KEY not in local .env (may still be set on Vercel runtime — /api/health reports hasServiceKey)"
+    ]
+  },
+  "anonAccess": {
+    "articles": {
+      "ok": true,
+      "count": 11
+    },
+    "sections": {
+      "ok": true,
+      "count": 10
+    },
+    "ads": {
+      "ok": true,
+      "count": 6
+    },
+    "profiles": {
+      "ok": true,
+      "count": 6
+    },
+    "settings": {
+      "ok": true,
+      "count": 10
+    }
+  },
+  "appFiles": {
+    "vercelJson": true,
+    "envExample": true,
+    "deployMd": true,
+    "logo": true,
+    "favicon": true,
+    "dbClient": true,
+    "healthApi": true,
+    "publicApi": true
+  }
+}
