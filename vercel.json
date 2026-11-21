@@ -1,0 +1,17 @@
+{
+  "rewrites": [
+    {
+      "source": "/s/:id(\\d+)",
+      "destination": "/api/public?resource=share&id=:id"
+    },
+    {
+      "source": "/((?!api/|assets/).*)",
+      "destination": "/index.html"
+    }
+  ],
+  "functions": {
+    "api/team.js": {
+      "maxDuration": 30
+    }
+  }
+}
