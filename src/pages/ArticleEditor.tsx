@@ -667,5 +667,4 @@ export default function ArticleEditor() {
     </>
   );
 }
-// after successful api call in save()
-window.dispatchEvent(new CustomEvent('cms-content-changed', { detail: { type: 'article', id: saved.id } }));
+
