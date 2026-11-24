@@ -1,11 +1,10 @@
-import { getSupabase } from './supabase';
+import supabase from './supabase';
 
 export class ApiError extends Error {
   status: number;
-  code?: string;
-  fields?: Record<string, string>;
-
-  constructor(message: string, status: number, code?: string, fields?: Record<string, string>) {
+  code: string | null;
+  fields: Record<string, string> | null;
+  constructor(message: string, status = 500, code: string | null = null, fields: Record<string, string> | null = null) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
@@ -14,14 +13,8 @@ export class ApiError extends Error {
   }
 }
 
-interface Options {
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
-  body?: unknown;
-}
-
-export async function api<T>(path: string, options: Options = {}): Promise<T> {
+export async function api<T = unknown>(path: string, opts: { method?: string; body?: unknown } = {}): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const supabase = await getSupabase();
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -29,16 +22,16 @@ export async function api<T>(path: string, options: Options = {}): Promise<T> {
   let res: Response;
   try {
     res = await fetch(path, {
-      method: options.method ?? 'GET',
+      method: opts.method ?? 'GET',
       headers,
-      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
     });
   } catch {
     throw new ApiError('Could not reach the newsroom server. Check your connection and try again.', 0);
   }
 
   const text = await res.text();
-  let json: unknown = null;
+  let json: any = null;
   try {
     json = text ? JSON.parse(text) : null;
   } catch {
@@ -46,16 +39,14 @@ export async function api<T>(path: string, options: Options = {}): Promise<T> {
   }
 
   if (!res.ok) {
-    const payload = (json ?? {}) as { error?: string; code?: string; fields?: Record<string, string> };
-    throw new ApiError(
-      payload.error || `Something went wrong (error ${res.status}). Try again in a moment.`,
-      res.status,
-      payload.code,
-      payload.fields,
-    );
+    const g = json ?? {};
+    throw new ApiError(g.error || res.statusText || 'Request failed', res.status, g.code ?? null, g.fields ?? null);
   }
   return json as T;
 }
 
-export const errorMessage = (err: unknown) =>
-  err instanceof Error ? err.message : 'Something went wrong. Try again in a moment.';
+export function errMsg(e: unknown): string {
+  if (e instanceof ApiError) return e.message;
+  if (e instanceof Error) return e.message;
+  return 'Something went wrong.';
+}

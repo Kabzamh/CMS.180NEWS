@@ -1,90 +1,74 @@
-import type { ReactNode } from 'react';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
-import { MotionConfig } from 'framer-motion';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
-import { ToastProvider } from './components/ui';
-import { ProtectedShell, RoleGate } from './components/Shell';
+import ProtectedRoute from './components/ProtectedRoute';
+import Layout from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Articles from './pages/Articles';
 import ArticleEditor from './pages/ArticleEditor';
 import Scheduled from './pages/Scheduled';
-import Media from './pages/Media';
-import Mail from './pages/Mail';
-import Notes from './pages/Notes';
-import Live from './pages/Live';
-import Assignments from './pages/Assignments';
-import Calendar from './pages/Calendar';
-import Records from './pages/Records';
-import { Categories, TagsPage } from './pages/SectionsTags';
-import Authors from './pages/Authors';
 import Breaking from './pages/Breaking';
-import Homepage from './pages/Homepage';
 import Comments from './pages/Comments';
-import Analytics from './pages/Analytics';
+import Media from './pages/Media';
+import Sections from './pages/Sections';
+import Tags from './pages/Tags';
+import Authors from './pages/Authors';
+import Homepage from './pages/Homepage';
 import Ads from './pages/Ads';
+import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
-import Team from './pages/Team';
+import Users from './pages/Users';
 import Account from './pages/Account';
-import NotFound from './pages/NotFound';
-
-const editors = (page: ReactNode) => <RoleGate roles={['owner', 'editor']}>{page}</RoleGate>;
+import Notifications from './pages/Notifications';
+import Mail from './pages/Mail';
+import SiteLayout from './pages/site/SiteLayout';
+import SiteHome from './pages/site/SiteHome';
+import SiteStory from './pages/site/SiteStory';
+import SiteSection from './pages/site/SiteSection';
+import SiteStaff from './pages/site/SiteStaff';
 
 export default function App() {
   return (
-    <MotionConfig reducedMotion="user">
-      <AuthProvider>
-        <ToastProvider>
-          <BrowserRouter>
-            <Routes>
-              <Route path="/login" element={<Login />} />
-              <Route element={<ProtectedShell />}>
-                <Route index element={<Dashboard />} />
-                <Route path="articles" element={<Articles />} />
-                <Route path="articles/new" element={<ArticleEditor key="new" />} />
-                <Route path="articles/:id" element={<ArticleEditor key="edit" />} />
-                <Route path="media" element={<Media />} />
-                <Route path="mail" element={<Mail />} />
-                <Route path="mail/:folder" element={<Mail />} />
-                <Route path="notes" element={<Notes />} />
-                <Route path="live" element={<Live />} />
-                <Route path="assignments" element={<Assignments />} />
-                <Route path="calendar" element={<Calendar />} />
-                <Route
-                  path="records"
-                  element={
-                    <RoleGate roles={['owner']}>
-                      <Records />
-                    </RoleGate>
-                  }
-                />
-                <Route path="scheduled" element={editors(<Scheduled />)} />
-                <Route path="breaking" element={editors(<Breaking />)} />
-                <Route path="comments" element={editors(<Comments />)} />
-                <Route path="categories" element={editors(<Categories />)} />
-                <Route path="tags" element={editors(<TagsPage />)} />
-                <Route path="authors" element={editors(<Authors />)} />
-                <Route path="homepage" element={editors(<Homepage />)} />
-                <Route path="ads" element={editors(<Ads />)} />
-                <Route path="analytics" element={editors(<Analytics />)} />
-                <Route path="settings" element={editors(<Settings />)} />
-                <Route
-                  path="users"
-                  element={
-                    <RoleGate roles={['owner']}>
-                      <Team />
-                    </RoleGate>
-                  }
-                />
-                <Route path="sections" element={<Navigate to="/categories" replace />} />
-                <Route path="team" element={<Navigate to="/users" replace />} />
-                <Route path="account" element={<Account />} />
-                <Route path="*" element={<NotFound />} />
-              </Route>
-            </Routes>
-          </BrowserRouter>
-        </ToastProvider>
-      </AuthProvider>
-    </MotionConfig>
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/site" element={<SiteLayout />}>
+            <Route index element={<SiteHome />} />
+            <Route path="story/:id" element={<SiteStory />} />
+            <Route path="section/:slug" element={<SiteSection />} />
+            <Route path="staff" element={<SiteStaff />} />
+          </Route>
+          <Route
+            element={
+              <ProtectedRoute>
+                <Layout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<Dashboard />} />
+            <Route path="articles" element={<Articles />} />
+            <Route path="articles/new" element={<ArticleEditor />} />
+            <Route path="articles/:id" element={<ArticleEditor />} />
+            <Route path="scheduled" element={<Scheduled />} />
+            <Route path="breaking" element={<Breaking />} />
+            <Route path="comments" element={<Comments />} />
+            <Route path="notifications" element={<Notifications />} />
+            <Route path="mail" element={<Mail />} />
+            <Route path="media" element={<Media />} />
+            <Route path="categories" element={<Sections />} />
+            <Route path="tags" element={<Tags />} />
+            <Route path="authors" element={<Authors />} />
+            <Route path="homepage" element={<Homepage />} />
+            <Route path="ads" element={<Ads />} />
+            <Route path="analytics" element={<Analytics />} />
+            <Route path="settings" element={<Settings />} />
+            <Route path="users" element={<Users />} />
+            <Route path="account" element={<Account />} />
+          </Route>
+          <Route path="*" element={<Navigate to="/site" replace />} />
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
   );
 }

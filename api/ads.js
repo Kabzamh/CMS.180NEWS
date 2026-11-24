@@ -1,64 +1,38 @@
 import supabase from './db-client.js';
-import { requireMember, logActivity, clean, isHttpUrl, fail } from './_lib.js';
-import { loadAdSlots, withSize } from './_adslots.js';
+import { cors, okOptions, fail, requireMember } from './_helpers.js';
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') return res.status(204).end();
+  cors(res);
+  if (okOptions(req, res)) return;
 
   try {
-    const member = await requireMember(req, res, ['owner', 'editor']);
-    if (!member) return;
+    const auth = await requireMember(req);
+    if (auth.error) return fail(res, auth.status, auth.error);
 
     if (req.method === 'GET') {
-      return res.status(200).json(await loadAdSlots());
+      const { data, error } = await supabase.from('ads').select('*').order('id', { ascending: true });
+      if (error) throw error;
+      return res.status(200).json(data || []);
     }
 
     if (req.method === 'PUT') {
-      const body = req.body || {};
-      const id = Number(body.id);
-      if (!id) return res.status(400).json({ error: 'Missing advert slot.' });
-      const { data: slot, error: findError } = await supabase.from('ads').select('*').eq('id', id).maybeSingle();
-      if (findError) throw findError;
-      if (!slot) return res.status(404).json({ error: 'That advert slot no longer exists.' });
-
-      const fields = {};
-      const advertiser = clean(body.advertiser, 80);
-      const imageUrl = clean(body.image_url, 600);
-      const linkUrl = clean(body.link_url, 600);
-      const enabled = body.enabled === true;
-      const positions = Array.isArray(slot.positions) ? slot.positions.map((p) => p[0]) : [];
-      const position = positions.includes(body.position) ? body.position : slot.position;
-
-      if (linkUrl && !isHttpUrl(linkUrl)) fields.link_url = 'Enter a full web address that starts with https://';
-      if (imageUrl && !isHttpUrl(imageUrl)) fields.image_url = 'The image link is not valid. Upload the image again.';
-      if (enabled && !imageUrl) fields.image_url = 'Add the advert image before switching this slot on.';
-      if (Object.keys(fields).length) return res.status(400).json({ error: 'Check the highlighted fields.', fields });
-
-      const { data, error } = await supabase
-        .from('ads')
-        .update({
-          advertiser,
-          image_url: imageUrl || null,
-          link_url: linkUrl || null,
-          position,
-          enabled,
-          width: Number(body.width) > 0 && imageUrl ? Math.round(Number(body.width)) : null,
-          height: Number(body.height) > 0 && imageUrl ? Math.round(Number(body.height)) : null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', id)
-        .select()
-        .single();
+      if (!['owner', 'editor'].includes(auth.member.role)) {
+        return fail(res, 403, 'Only editors can manage ads.');
+      }
+      const b = req.body || {};
+      if (!b.id) return fail(res, 400, 'Missing ad id.');
+      const patch = {};
+      for (const k of ['advertiser', 'link_url', 'image_url', 'position', 'enabled', 'width', 'height', 'slot', 'slot_name']) {
+        if (b[k] !== undefined) patch[k] = b[k];
+      }
+      const { data, error } = await supabase.from('ads').update(patch).eq('id', b.id).select().single();
       if (error) throw error;
-      await logActivity(member, 'updated', 'ad', id, `${member.name} updated the ${slot.slot_name} advert`);
-      return res.status(200).json(withSize(data));
+      return res.status(200).json(data);
     }
 
-    res.status(405).json({ error: 'Method not allowed' });
+    return fail(res, 405, 'Method not allowed');
   } catch (err) {
-    fail(res, err);
+    console.error('ads error:', err);
+    return fail(res, 500, err.message || 'Server error');
   }
 }

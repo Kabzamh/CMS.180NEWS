@@ -1,39 +1,16 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, CalendarClock, ExternalLink, Eye, EyeOff, History, PenLine, Save, Send, Trash2, Undo2, UserRound, Zap } from 'lucide-react';
-import { api, ApiError, errorMessage } from '../lib/api';
-import { useMember } from '../contexts/AuthContext';
-import { useLoad } from '../hooks/useLoad';
-import { canEdit, type Article, type ArticleClip, type ArticleStatus, type PictureCredits, type Placement, type AuthorsResponse, type Section, type Settings, type TagCount } from '../lib/types';
-import { fmtDateTime, fromLocalInput, siteStoryPath, timeAgo, toLocalInput, wordCount } from '../lib/format';
-import { ArticlePreview } from '../components/ArticlePreview';
-import { ClipsEditor } from '../components/ClipsEditor';
-import { SeoCard } from '../components/SeoCard';
-import { AssignDialog } from '../components/AssignDialog';
-import { RevisionsDialog } from '../components/RevisionsDialog';
-import { DESK, DUE_TONE, desk, dueLabel, type DeskBoard, type Snapshot } from '../lib/desk';
-import type { Author } from '../lib/types';
-import { ImagePicker } from '../components/ImagePicker';
-import { TagInput } from '../components/TagInput';
+import { Save, Send, Clock, EyeOff, Trash2, ImagePlus, X, Youtube, Film, Headphones } from 'lucide-react';
+import { useApi } from '../hooks/useApi';
+import { api, ApiError, errMsg } from '../lib/api';
+import { useAuth } from '../contexts/AuthContext';
 import {
-  Button,
-  Card,
-  CardHead,
-  ConfirmDialog,
-  Dialog,
-  Toggle,
-  ErrorState,
-  PageHeader,
-  SelectInput,
-  Spinner,
-  StatusBadge,
-  TextArea,
-  TextInput,
-  cx,
-  useToast,
+  PageHeader, Card, CardHead, Button, Input, TextArea, Select, Spinner, ErrorBox, Toast, Badge,
 } from '../components/ui';
+import { MediaPlayer, parseYouTubeId } from '../components/MediaPlayer';
+import type { Article, ArticleStatus, MediaAsset, MediaEmbed, Placement, Section } from '../lib/types';
 
-interface Form {
+interface FormState {
   headline: string;
   summary: string;
   body: string;
@@ -46,12 +23,10 @@ interface Form {
   placement: Placement;
   when: 'now' | 'later';
   publish_local: string;
-  media: ArticleClip[];
-  seo_title: string;
-  seo_description: string;
+  media: Article['media'];
 }
 
-const blank = (author: string): Form => ({
+const empty = (name: string): FormState => ({
   headline: '',
   summary: '',
   body: '',
@@ -60,917 +35,635 @@ const blank = (author: string): Form => ({
   image_url: null,
   image_caption: '',
   image_credit: '',
-  author_name: author,
+  author_name: name,
   placement: 'none',
   when: 'now',
   publish_local: '',
   media: [],
-  seo_title: '',
-  seo_description: '',
 });
 
-const fromArticle = (a: Article): Form => ({
-  headline: a.headline,
-  summary: a.summary ?? '',
-  body: a.body ?? '',
-  section: a.section ?? '',
-  tags: Array.isArray(a.tags) ? a.tags : [],
-  image_url: a.image_url,
-  image_caption: a.image_caption ?? '',
-  image_credit: a.image_credit ?? '',
-  author_name: a.author_name ?? '',
-  placement: a.placement,
-  when: a.status === 'scheduled' ? 'later' : 'now',
-  publish_local: a.status === 'scheduled' ? toLocalInput(a.publish_at) : '',
-  media: a.media ?? [],
-  seo_title: a.seo_title ?? '',
-  seo_description: a.seo_description ?? '',
-});
-
-interface Action {
-  label: string;
-  /** Shorter wording for the narrow action bar on phones. */
-  short?: string;
-  status: ArticleStatus;
-  icon: ReactNode;
+function fromArticle(a: Article): FormState {
+  return {
+    headline: a.headline,
+    summary: a.summary ?? '',
+    body: a.body ?? '',
+    section: a.section ?? '',
+    tags: Array.isArray(a.tags) ? a.tags : [],
+    image_url: a.image_url,
+    image_caption: a.image_caption ?? '',
+    image_credit: a.image_credit ?? '',
+    author_name: a.author_name ?? '',
+    placement: a.placement || 'none',
+    when: a.status === 'scheduled' ? 'later' : 'now',
+    publish_local:
+      a.status === 'scheduled' && a.publish_at
+        ? new Date(a.publish_at).toISOString().slice(0, 16)
+        : '',
+    media: a.media ?? [],
+  };
 }
 
-const ICON = 'h-[18px] w-[18px]';
-
-function actionsFor(current: ArticleStatus | null, editor: boolean, when: 'now' | 'later'): { primary: Action; secondary: Action[] } {
-  const publish: Action =
-    when === 'later'
-      ? { label: current === 'scheduled' ? 'Save schedule' : 'Schedule', status: 'scheduled', icon: <CalendarClock className={ICON} aria-hidden="true" /> }
-      : { label: current === 'hidden' ? 'Publish again' : 'Publish now', status: 'published', icon: <Send className={ICON} aria-hidden="true" /> };
-  const saveDraft: Action = { label: 'Save draft', status: 'draft', icon: <Save className={ICON} aria-hidden="true" /> };
-  const backToDraft: Action = { label: 'Move back to draft', short: 'To draft', status: 'draft', icon: <Undo2 className={ICON} aria-hidden="true" /> };
-  const keep = (status: ArticleStatus): Action => ({ label: 'Save changes', status, icon: <Save className={ICON} aria-hidden="true" /> });
-
-  if (!editor) {
-    if (current === 'review') return { primary: keep('review'), secondary: [backToDraft] };
-    return { primary: { label: 'Request approval', short: 'Request approval', status: 'review', icon: <Send className={ICON} aria-hidden="true" /> }, secondary: [saveDraft] };
-  }
-  switch (current) {
-    case 'review':
-      return { primary: publish, secondary: [keep('review'), backToDraft] };
-    case 'scheduled':
-      return { primary: publish, secondary: [{ ...backToDraft, label: 'Unschedule', short: 'Unschedule' }] };
-    case 'published':
-      return {
-        primary: { label: 'Update story', status: 'published', icon: <Save className={ICON} aria-hidden="true" /> },
-        secondary: [{ label: 'Hide from the site', short: 'Hide', status: 'hidden', icon: <EyeOff className={ICON} aria-hidden="true" /> }],
-      };
-    case 'hidden':
-      return { primary: publish, secondary: [keep('hidden')] };
-    default:
-      return { primary: publish, secondary: [saveDraft] };
-  }
+function toLocalInputValue(d = new Date()) {
+  const off = d.getTimezoneOffset();
+  const local = new Date(d.getTime() - off * 60000);
+  return local.toISOString().slice(0, 16);
 }
-
-const SAVED_MESSAGE: Record<ArticleStatus, string> = {
-  draft: 'Draft saved.',
-  review: 'Saved. It is with the editors for review.',
-  scheduled: 'Scheduled.',
-  published: 'Published. It is live on the site feed.',
-  hidden: 'Saved. It is hidden from the site.',
-};
-
-const PLACEMENTS: { value: Placement; title: string; text: string }[] = [
-  { value: 'none', title: 'Not on the front page', text: 'It appears in its section, in Latest and in search.' },
-  { value: 'main', title: 'Main headline', text: 'Leads the front page, in place of the current main headline.' },
-  { value: 'headline', title: 'Headline news', text: 'One of the stories beside the main headline, newest first.' },
-];
 
 export default function ArticleEditor() {
   const { id } = useParams();
-  const isNew = !id;
-  const member = useMember();
-  const editor = canEdit(member);
-  const navigate = useNavigate();
-  const toast = useToast();
-
-  const sections = useLoad(() => api<Section[]>('/api/sections'), []);
-  const tagList = useLoad(() => api<TagCount[]>('/api/tags'), []);
-  const authorList = useLoad(() => api<AuthorsResponse>('/api/team?resource=authors'), []);
-  const siteSettings = useLoad(() => api<Settings>('/api/settings'), []);
-  const pictureCredits = useLoad(() => api<PictureCredits>('/api/articles?credits=1'), []);
-
+  const isNew = !id || id === 'new';
+  const nav = useNavigate();
+  const { member } = useAuth();
+  const [form, setForm] = useState<FormState>(() => empty(member?.name || ''));
   const [article, setArticle] = useState<Article | null>(null);
   const [loading, setLoading] = useState(!isNew);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [form, setForm] = useState<Form>(() => blank(member.name));
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [saving, setSaving] = useState<ArticleStatus | null>(null);
-  const [dirty, setDirty] = useState(false);
-  const [view, setView] = useState<'write' | 'preview'>('write');
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [attempt, setAttempt] = useState(0);
-  const [clipBusy, setClipBusy] = useState(false);
-  // The news desk: assigning, sending back, version history and breaking-news alerts.
-  const [people, setPeople] = useState<Author[] | null>(null);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [sendBackOpen, setSendBackOpen] = useState(false);
-  const [note, setNote] = useState('');
-  const [noteError, setNoteError] = useState<string | undefined>();
-  const [breakingOpen, setBreakingOpen] = useState(false);
-  const [line, setLine] = useState('');
-  const [pin, setPin] = useState(true);
-  const [deskBusy, setDeskBusy] = useState(false);
-  // What happened to the caption and credit when the picture was last changed.
-  const [pictureNote, setPictureNote] = useState<{ kind: 'filled' } | { kind: 'cleared'; caption: string; credit: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [fields, setFields] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const [tagInput, setTagInput] = useState('');
+  const [picker, setPicker] = useState<'image' | 'clip' | false>(false);
+  const [delOpen, setDelOpen] = useState(false);
+  const [ytUrl, setYtUrl] = useState('');
+  const [ytError, setYtError] = useState<string | null>(null);
+  const [clipUploading, setClipUploading] = useState(false);
+
+  const sections = useApi<Section[]>(() => api('/api/sections'), []);
+  const media = useApi<MediaAsset[]>(() => api('/api/media'), []);
 
   useEffect(() => {
-    document.title = `${isNew ? 'New article' : 'Edit article'} · 180news Newsroom CMS`;
+    document.title = isNew ? 'New story · 180news Newsroom CMS' : 'Edit story · 180news Newsroom CMS';
   }, [isNew]);
 
   useEffect(() => {
-    if (!id) return;
-    let cancelled = false;
+    if (isNew) {
+      setForm(empty(member?.name || ''));
+      setLoading(false);
+      return;
+    }
+    let alive = true;
     setLoading(true);
-    setLoadError(null);
-    api<Article>(`/api/articles?id=${encodeURIComponent(id)}`)
+    api<Article>(`/api/articles?id=${encodeURIComponent(id!)}`)
       .then((a) => {
-        if (cancelled) return;
+        if (!alive) return;
         setArticle(a);
         setForm(fromArticle(a));
-        setDirty(false);
       })
-      .catch((err) => {
-        if (!cancelled) setLoadError(errorMessage(err));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+      .catch((e) => alive && setError(errMsg(e)))
+      .finally(() => alive && setLoading(false));
     return () => {
-      cancelled = true;
+      alive = false;
     };
-  }, [id, attempt]);
+  }, [id, isNew, member?.name]);
 
-  useEffect(() => {
-    if (!dirty) return;
-    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
-    window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
-  }, [dirty]);
+  const set = (patch: Partial<FormState>) => setForm((f) => ({ ...f, ...patch }));
 
-  const update = (patch: Partial<Form>) => {
-    setForm((f) => ({ ...f, ...patch }));
-    setDirty(true);
-    const keys = Object.keys(patch).map((k) => (k === 'publish_local' || k === 'when' ? 'publish_at' : k));
-    if (keys.some((k) => errors[k])) {
-      setErrors((prev) => {
-        const next = { ...prev };
-        for (const k of keys) delete next[k];
-        return next;
-      });
-    }
+  const buildPayload = (status: ArticleStatus) => {
+    const publish_at =
+      status === 'scheduled'
+        ? form.publish_local
+          ? new Date(form.publish_local).toISOString()
+          : null
+        : status === 'published'
+          ? article?.publish_at || new Date().toISOString()
+          : article?.publish_at || null;
+    return {
+      headline: form.headline.trim(),
+      summary: form.summary,
+      body: form.body,
+      section: form.section,
+      tags: form.tags,
+      image_url: form.image_url,
+      image_caption: form.image_caption,
+      image_credit: form.image_credit,
+      author_name: form.author_name,
+      placement: form.placement,
+      media: form.media,
+      status,
+      publish_at,
+    };
   };
 
-  if (loading) return <Spinner label="Opening the story" />;
-  if (loadError) {
-    return (
-      <>
-        <PageHeader eyebrow="Articles" title="Edit article" />
-        <ErrorState message={loadError} onRetry={() => setAttempt((n) => n + 1)} />
-        <Link to="/articles" className="mt-4 inline-flex items-center gap-1.5 text-[15px] font-bold text-navy hover:underline">
-          <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Back to all articles
-        </Link>
-      </>
-    );
-  }
+  const save = async (status: ArticleStatus) => {
+    const f: Record<string, string> = {};
+    if (form.headline.trim().length < 4) f.headline = 'Give the story a headline (at least 4 characters).';
+    if (status !== 'draft' && !form.section) f.section = 'Choose a category before leaving draft.';
+    if (status === 'scheduled' && !form.publish_local) f.publish_local = 'Pick a date and time to schedule.';
+    setFields(f);
+    if (Object.keys(f).length) return;
 
-  const current = article?.status ?? null;
-  const author = !article || article.author_id === member.id;
-  const workflow = article?.workflow ?? null;
-  const own = author || workflow?.assigned_to === member.id;
-  const locked = !editor && Boolean(article) && (!own || (current !== 'draft' && current !== 'review'));
-  const canDelete = Boolean(article) && (editor || (author && current === 'draft'));
-  const { primary, secondary } = actionsFor(current, editor, form.when);
-  const sectionLabel = sections.data?.find((s) => s.slug === form.section)?.label ?? '';
-  const disabled = locked || saving !== null;
-  const words = wordCount(form.body);
-
-  const validate = (next: ArticleStatus) => {
-    const found: Record<string, string> = {};
-    if (form.headline.trim().length < 4) found.headline = 'Give the story a headline (at least 4 characters).';
-    if (next !== 'draft') {
-      if (!form.section) found.section = 'Choose a category.';
-      if (form.body.trim().length < 20) found.body = 'Write the story before it goes any further (at least 20 characters).';
-      else if (form.body.trim().length > 20000) found.body = `The site shows up to 20 000 characters. Shorten the story by ${form.body.trim().length - 20000}.`;
-    }
-    if (next === 'scheduled') {
-      if (!form.publish_local) found.publish_at = 'Choose a date and time.';
-      else if (new Date(form.publish_local).getTime() <= Date.now() + 60000) found.publish_at = 'Choose a time in the future, or publish straight away.';
-    }
-    return found;
-  };
-
-  const showErrors = (found: Record<string, string>) => {
-    setErrors(found);
-    setView('write');
-    const first = ['headline', 'summary', 'body', 'media', 'publish_at', 'section', 'tags'].find((k) => found[k]);
-    if (first) setTimeout(() => document.getElementById(`f-${first}`)?.focus(), 60);
-  };
-
-  const save = async (next: ArticleStatus) => {
-    if (clipBusy) {
-      toast('Wait for the upload to finish, or cancel it, before saving.', 'error');
-      return;
-    }
-    const found = validate(next);
-    if (Object.keys(found).length) {
-      showErrors(found);
-      toast('Check the highlighted fields.', 'error');
-      return;
-    }
-    setSaving(next);
+    setSaving(true);
     try {
-      const payload = {
-        headline: form.headline,
-        summary: form.summary,
-        body: form.body,
-        section: form.section,
-        tags: form.tags,
-        image_url: form.image_url ?? '',
-        image_caption: form.image_caption,
-        image_credit: form.image_credit,
-        author_name: form.author_name,
-        placement: form.placement,
-        media: form.media,
-        seo_title: form.seo_title,
-        seo_description: form.seo_description,
-        status: next,
-        publish_at: next === 'scheduled' ? fromLocalInput(form.publish_local) : null,
-      };
-      const saved = await api<Article>('/api/articles', {
-        method: article ? 'PUT' : 'POST',
-        body: article ? { id: article.id, ...payload } : payload,
-      });
+      const body = buildPayload(status);
+      const saved = isNew || !article
+        ? await api<Article>('/api/articles', { method: 'POST', body })
+        : await api<Article>('/api/articles', { method: 'PUT', body: { id: article.id, ...body } });
       setArticle(saved);
       setForm(fromArticle(saved));
-      setDirty(false);
-      setErrors({});
-      setPictureNote(null);
-      pictureCredits.reload(true); // this story's picture and credit now count towards the suggestions
-      toast(saved.status === 'scheduled' ? `Scheduled for ${fmtDateTime(saved.publish_at)}.` : SAVED_MESSAGE[saved.status]);
-      if (saved.warning) toast(saved.warning, 'error');
-      if (!article) navigate(`/articles/${saved.id}`, { replace: true });
-    } catch (err) {
-      if (err instanceof ApiError && err.fields) showErrors(err.fields);
-      toast(errorMessage(err), 'error');
+      const msgs: Record<string, string> = {
+        draft: 'Draft saved.',
+        review: 'Saved. It is with the editors for review.',
+        scheduled: `Scheduled for ${new Date(saved.publish_at!).toLocaleString('en-ZA')}.`,
+        published: 'Published. It is live on the site feed.',
+        hidden: 'Saved. It is hidden from the site.',
+      };
+      setToast(msgs[status] || 'Saved.');
+      if (isNew) nav(`/articles/${saved.id}`, { replace: true });
+    } catch (e) {
+      if (e instanceof ApiError && e.fields) setFields(e.fields);
+      setToast(errMsg(e));
     } finally {
-      setSaving(null);
+      setSaving(false);
+      setTimeout(() => setToast(null), 3500);
     }
   };
+
+  const uploadFile = async (file: File) => {
+    const base64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    return api<MediaAsset>('/api/media', {
+      method: 'POST',
+      body: { fileName: file.name, fileBase64: base64, contentType: file.type },
+    });
+  };
+
+  const onUpload = async (file: File) => {
+    try {
+      const row = await uploadFile(file);
+      set({ image_url: row.url });
+      media.reload(true);
+      setToast('Image uploaded.');
+    } catch (e) {
+      setToast(errMsg(e));
+    } finally {
+      setTimeout(() => setToast(null), 3000);
+    }
+  };
+
+  const onClipUpload = async (file: File) => {
+    setClipUploading(true);
+    try {
+      const row = await uploadFile(file);
+      const kind: MediaEmbed['kind'] =
+        row.kind === 'audio' || row.content_type?.startsWith('audio/') ? 'audio' : 'video';
+      const embed: MediaEmbed = {
+        kind,
+        url: row.url,
+        youtube_id: null,
+        title: row.file_name || '',
+        caption: '',
+        credit: '',
+        slot: 'top',
+        width: row.width,
+        height: row.height,
+        content_type: row.content_type,
+        size: row.size,
+        file_name: row.file_name,
+      };
+      set({ media: [...form.media, embed] });
+      media.reload(true);
+      setToast(kind === 'audio' ? 'Audio attached to the story.' : 'Video attached to the story.');
+    } catch (e) {
+      setToast(errMsg(e));
+    } finally {
+      setClipUploading(false);
+      setTimeout(() => setToast(null), 3000);
+    }
+  };
+
+  const addYouTube = () => {
+    const id = parseYouTubeId(ytUrl);
+    if (!id) {
+      setYtError('That does not look like a YouTube link. Copy it from the Share button under the video.');
+      return;
+    }
+    const isShorts = /\/shorts\//i.test(ytUrl);
+    const embed: MediaEmbed = {
+      kind: 'youtube',
+      url: `https://www.youtube.com/watch?v=${id}`,
+      youtube_id: id,
+      title: '',
+      caption: '',
+      credit: '',
+      slot: 'top',
+      width: isShorts ? 9 : 16,
+      height: isShorts ? 16 : 9,
+      content_type: null,
+      size: null,
+      file_name: null,
+    };
+    set({ media: [...form.media, embed] });
+    setYtUrl('');
+    setYtError(null);
+    setToast('YouTube video added.');
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  const removeMedia = (idx: number) => set({ media: form.media.filter((_, i) => i !== idx) });
 
   const remove = async () => {
     if (!article) return;
-    setDeleting(true);
+    setSaving(true);
     try {
       await api('/api/articles', { method: 'DELETE', body: { id: article.id } });
-      setDirty(false);
-      toast('Story deleted.');
-      navigate('/articles', { replace: true });
-    } catch (err) {
-      toast(errorMessage(err), 'error');
-      setDeleting(false);
+      nav('/articles', { replace: true });
+    } catch (e) {
+      setToast(errMsg(e));
+      setSaving(false);
     }
   };
 
-  // A caption and a credit belong to one picture. When the picture changes they are not carried over
-  // to the new one: they are cleared, or filled in from the last story that ran the new picture.
-  const pickPicture = (url: string | null) => {
-    if (url === form.image_url) return;
-    const known = url ? pictureCredits.data?.byImage[url] : undefined;
-    const had = Boolean(form.image_caption.trim() || form.image_credit.trim());
-    update({ image_url: url, image_caption: known?.caption ?? '', image_credit: known?.credit ?? '' });
-    setPictureNote(known ? { kind: 'filled' } : had && url ? { kind: 'cleared', caption: form.image_caption, credit: form.image_credit } : null);
-  };
+  if (loading) return <Spinner label="Loading story" />;
+  if (error) return <ErrorBox message={error} />;
 
-  const saved = (what: string) => {
-    if (!dirty) return true;
-    toast(`Save your changes before ${what}.`, 'error');
-    return false;
-  };
-  const reloadStory = () => setAttempt((n) => n + 1);
-
-  const openAssign = async () => {
-    try {
-      setPeople((await api<DeskBoard>(`${DESK}&view=board`)).people);
-    } catch (err) {
-      toast(errorMessage(err), 'error');
-    }
-  };
-
-  const sendBack = async () => {
-    if (!article) return;
-    if (note.trim().length < 3) return setNoteError('Say what the story needs before it can be approved.');
-    setDeskBusy(true);
-    try {
-      await desk('sendback', { id: article.id, note });
-      toast('Sent back to the reporter with your note.');
-      setSendBackOpen(false);
-      setNote('');
-      reloadStory();
-    } catch (err) {
-      setNoteError(errorMessage(err));
-    } finally {
-      setDeskBusy(false);
-    }
-  };
-
-  const sendBreaking = async () => {
-    if (!article) return;
-    setDeskBusy(true);
-    try {
-      const sent = await desk<{ alerted: number; pinned: boolean }>('breaking', { id: article.id, line, pin });
-      toast(`Breaking-news alert sent. The line is on the site’s crawl${sent.pinned ? ', the story is pinned as the lead' : ''}, and ${sent.alerted} ${sent.alerted === 1 ? 'person was' : 'people were'} told in Mail.`);
-      setBreakingOpen(false);
-      reloadStory();
-    } catch (err) {
-      toast(errorMessage(err), 'error');
-    } finally {
-      setDeskBusy(false);
-    }
-  };
-
-  const nowSnapshot: Snapshot = {
-    headline: form.headline,
-    summary: form.summary,
-    body: form.body,
-    section: form.section || null,
-    tags: form.tags,
-    image_url: form.image_url,
-    image_caption: form.image_caption,
-    image_credit: form.image_credit,
-    author_name: form.author_name,
-    placement: form.placement,
-    seo_title: form.seo_title,
-    seo_description: form.seo_description,
-    clips: form.media.map((clip) => ({ kind: clip.kind, url: clip.url, title: clip.title })),
-  };
-
-  const restoreVersion = (version: Snapshot, savedAt: string) => {
-    update({
-      headline: version.headline,
-      summary: version.summary,
-      body: version.body,
-      section: version.section && sections.data?.some((sec) => sec.slug === version.section) ? version.section : form.section,
-      tags: version.tags ?? [],
-      image_url: version.image_url,
-      image_caption: version.image_caption ?? '',
-      image_credit: version.image_credit ?? '',
-      author_name: version.author_name || form.author_name,
-      seo_title: version.seo_title ?? '',
-      seo_description: version.seo_description ?? '',
-    });
-    setPictureNote(null);
-    setHistoryOpen(false);
-    setView('write');
-    toast(`The version of ${fmtDateTime(savedAt)} is in the editor. Save to keep it.`);
-  };
-
-  const actionButtons = (stacked: boolean) => (
-    <>
-      <Button
-        variant="primary"
-        className={stacked ? 'w-full' : 'min-w-0 flex-1 px-3'}
-        loading={saving === primary.status}
-        disabled={disabled || clipBusy}
-        onClick={() => save(primary.status)}
-        icon={stacked ? primary.icon : undefined}
-      >
-        {stacked ? primary.label : primary.short ?? primary.label}
-      </Button>
-      {(stacked ? secondary : secondary.slice(0, 1)).map((action) => (
-        <Button
-          key={action.label}
-          variant="outline"
-          className={stacked ? 'w-full' : 'min-w-0 flex-1 px-3'}
-          loading={saving === action.status}
-          disabled={disabled || clipBusy}
-          onClick={() => save(action.status)}
-          icon={stacked ? action.icon : undefined}
-        >
-          {stacked ? action.label : action.short ?? action.label}
-        </Button>
-      ))}
-    </>
-  );
+  const status = article?.status || 'draft';
 
   return (
-    <div className={locked ? '' : 'pb-24 lg:pb-0'}>
-      <Link to="/articles" className="mb-4 inline-flex items-center gap-1.5 text-[15px] font-bold text-navy hover:underline">
-        <ArrowLeft className="h-4 w-4" aria-hidden="true" /> All articles
-      </Link>
-
+    <>
       <PageHeader
-        eyebrow="Articles"
-        title={isNew ? 'New article' : locked ? 'Read article' : 'Edit article'}
-        description={
-          article
-            ? `Last saved ${timeAgo(article.updated_at)}${article.updated_by ? ` by ${article.updated_by}` : ''}.${dirty ? ' You have changes that are not saved yet.' : ''}`
-            : 'It is saved to the newsroom for the whole team, not to this device.'
-        }
+        eyebrow="Desk"
+        title={isNew ? 'New story' : 'Edit story'}
+        description={isNew ? 'Draft a story for the 180news site.' : undefined}
         actions={
-          <>
-          {article && (
-            <Button variant="outline" className="h-10" onClick={() => setHistoryOpen(true)} icon={<History className="h-4 w-4" aria-hidden="true" />}>
-              Version history
-            </Button>
-          )}
-          <div role="group" aria-label="View" className="flex border border-line-strong bg-paper">
-            {(
-              [
-                { key: 'write', label: 'Write', icon: PenLine },
-                { key: 'preview', label: 'Preview', icon: Eye },
-              ] as const
-            ).map(({ key, label, icon: Icon }) => (
-              <button
-                key={key}
-                type="button"
-                aria-pressed={view === key}
-                onClick={() => setView(key)}
-                className={cx(
-                  'inline-flex h-10 cursor-pointer items-center gap-2 px-4 text-[15px] font-bold whitespace-nowrap transition-colors',
-                  view === key ? 'bg-ink text-white' : 'text-body hover:bg-wash',
-                )}
-              >
-                <Icon className="h-4 w-4" aria-hidden="true" />
-                {label}
-              </button>
-            ))}
+          <div className="flex flex-wrap gap-2">
+            {article && <Badge tone={status}>{status}</Badge>}
+            <Link to="/articles"><Button variant="outline">Back</Button></Link>
           </div>
-          </>
         }
       />
 
-      {article?.warning && (
-        <div role="alert" className="mb-5 border-l-4 border-brand bg-brand-tint px-4 py-3 text-[15px] font-semibold text-ink">
-          {article.warning}
-        </div>
-      )}
-      {workflow?.review_note && current === 'draft' && (
-        <div role="status" className="mb-5 border-l-4 border-warn bg-warn-tint px-4 py-3 text-[15px] leading-snug text-ink">
-          <p className="font-extrabold">
-            Sent back by {workflow.review_by ?? 'an editor'}
-            {workflow.review_at ? ` on ${fmtDateTime(workflow.review_at)}` : ''}
-          </p>
-          <p className="mt-1 break-words whitespace-pre-line">{workflow.review_note}</p>
-          <p className="mt-1 text-sm text-body">Make the changes, then request approval again.</p>
-        </div>
-      )}
-      {locked && (
-        <div role="status" className="mb-5 border-l-4 border-warn bg-warn-tint px-4 py-3 text-[15px] font-semibold text-ink">
-          {own ? 'This story is with the editors now, so it can no longer be changed here.' : 'This is another reporter’s story. You can read it, but only they and the editors can change it.'}
-        </div>
-      )}
-
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="min-w-0">
-          {view === 'preview' ? (
-            <ArticlePreview
-              headline={form.headline}
-              summary={form.summary}
-              body={form.body}
-              sectionLabel={sectionLabel}
-              author={form.author_name}
-              date={article?.status === 'published' ? article.publish_at : form.when === 'later' && form.publish_local ? fromLocalInput(form.publish_local) : new Date().toISOString()}
-              imageUrl={form.image_url}
-              imageCaption={form.image_caption}
-              imageCredit={form.image_credit}
-              tags={form.tags}
-              clips={form.media}
+      <div className="grid items-start gap-6 lg:grid-cols-[1fr_320px]">
+        <div className="space-y-4">
+          <Card className="p-5 space-y-4">
+            <Input
+              label="Headline"
+              value={form.headline}
+              onChange={(e) => set({ headline: e.target.value })}
+              error={fields.headline}
+              maxLength={200}
             />
-          ) : (
-            <>
-            <Card className="space-y-5 p-5 sm:p-6">
-              <TextArea
-                id="f-headline"
-                label="Headline"
-                rows={2}
-                maxLength={140}
-                disabled={disabled}
-                value={form.headline}
-                onChange={(e) => update({ headline: e.target.value.replace(/\n/g, ' ') })}
-                error={errors.headline}
-                hint={`${form.headline.length} of 140 characters. Short and specific reads best on a phone.`}
-                placeholder="What happened, in one line"
-                className="resize-none text-[22px] leading-tight font-extrabold tracking-tight sm:text-[26px]"
-              />
-              <TextArea
-                id="f-summary"
-                label="Summary"
-                optional
-                rows={2}
-                maxLength={300}
-                disabled={disabled}
-                value={form.summary}
-                onChange={(e) => update({ summary: e.target.value })}
-                error={errors.summary}
-                hint="One or two sentences shown under the headline and in lists."
-                className="resize-y"
-              />
-              <TextArea
-                id="f-body"
-                label="Article"
-                rows={18}
-                disabled={disabled}
-                value={form.body}
-                onChange={(e) => update({ body: e.target.value })}
-                error={errors.body}
-                hint={`${words} ${words === 1 ? 'word' : 'words'}, about ${Math.max(1, Math.round(words / 220))} min to read. Leave a blank line between paragraphs. Start a line with ## for a subheading or > for a quote.`}
-                className="min-h-[360px] resize-y text-[16.5px] leading-[1.65]"
-              />
-            </Card>
-            <div id="f-media" tabIndex={-1} className="mt-6 scroll-mt-20 focus:outline-none">
-              <ClipsEditor value={form.media} onChange={(media) => update({ media })} disabled={locked || saving !== null} error={errors.media} onBusyChange={setClipBusy} />
+            <TextArea
+              label="Summary"
+              rows={3}
+              value={form.summary}
+              onChange={(e) => set({ summary: e.target.value })}
+              hint="Shown on cards and in feeds."
+            />
+            <TextArea
+              label="Body"
+              rows={16}
+              value={form.body}
+              onChange={(e) => set({ body: e.target.value })}
+              className="resize-y font-normal leading-relaxed"
+              hint="Write the full story. Use blank lines between paragraphs."
+            />
+          </Card>
+
+          <Card>
+            <CardHead title="Picture" note="Hero image for the story" />
+            <div className="space-y-3 p-5">
+              {form.image_url ? (
+                <div className="relative">
+                  <img src={form.image_url} alt="" className="max-h-64 w-full object-cover" />
+                  <button
+                    type="button"
+                    className="absolute top-2 right-2 cursor-pointer bg-ink/80 p-1.5 text-white"
+                    onClick={() => set({ image_url: null })}
+                    aria-label="Remove image"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : (
+                <p className="text-sm text-muted">No image yet.</p>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <label className="inline-flex h-11 cursor-pointer items-center gap-2 border border-line-strong bg-paper px-4 text-[15px] font-bold hover:bg-wash">
+                  <ImagePlus className="h-4 w-4" /> Upload
+                  <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && onUpload(e.target.files[0])} />
+                </label>
+                <Button type="button" variant="outline" onClick={() => { media.reload(); setPicker('image'); }}>
+                  Media library
+                </Button>
+              </div>
+              <Input label="Caption" value={form.image_caption} onChange={(e) => set({ image_caption: e.target.value })} />
+              <Input label="Credit" value={form.image_credit} onChange={(e) => set({ image_credit: e.target.value })} />
             </div>
-            <div className="mt-6">
-              <SeoCard
-                headline={form.headline}
-                summary={form.summary}
-                body={form.body}
-                imageUrl={form.image_url}
-                title={form.seo_title}
-                description={form.seo_description}
-                disabled={disabled}
-                onChange={update}
-                shareUrl={article && current === 'published' ? `${window.location.origin}/s/${article.id}` : null}
-              />
+          </Card>
+
+          <Card>
+            <CardHead title="Video & audio" note="YouTube, short videos and audio clips in the story" />
+            <div className="space-y-4 p-5">
+              <div>
+                <span className="mb-1.5 flex items-center gap-2 text-sm font-bold text-ink">
+                  <Youtube className="h-4 w-4 text-brand" /> YouTube link
+                </span>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <input
+                    value={ytUrl}
+                    onChange={(e) => { setYtUrl(e.target.value); setYtError(null); }}
+                    placeholder="https://www.youtube.com/watch?v=… or Shorts link"
+                    className="h-11 flex-1 border border-line-strong px-3.5 outline-none focus:border-navy focus:ring-2 focus:ring-navy/20"
+                  />
+                  <Button type="button" variant="navy" onClick={addYouTube}>Add YouTube</Button>
+                </div>
+                {ytError && <p className="mt-1 text-sm font-bold text-brand">{ytError}</p>}
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <label className="inline-flex h-11 cursor-pointer items-center gap-2 border border-line-strong bg-paper px-4 text-[15px] font-bold hover:bg-wash">
+                  <Film className="h-4 w-4" /> {clipUploading ? 'Uploading…' : 'Upload short video'}
+                  <input
+                    type="file"
+                    accept="video/mp4,video/webm,video/quicktime"
+                    className="hidden"
+                    disabled={clipUploading}
+                    onChange={(e) => e.target.files?.[0] && onClipUpload(e.target.files[0])}
+                  />
+                </label>
+                <label className="inline-flex h-11 cursor-pointer items-center gap-2 border border-line-strong bg-paper px-4 text-[15px] font-bold hover:bg-wash">
+                  <Headphones className="h-4 w-4" /> Upload audio
+                  <input
+                    type="file"
+                    accept="audio/mpeg,audio/mp4,audio/wav,audio/webm,audio/*"
+                    className="hidden"
+                    disabled={clipUploading}
+                    onChange={(e) => e.target.files?.[0] && onClipUpload(e.target.files[0])}
+                  />
+                </label>
+                <Button type="button" variant="outline" onClick={() => { media.reload(); setPicker('clip'); }}>
+                  From library
+                </Button>
+              </div>
+
+              {form.media.length === 0 ? (
+                <p className="text-sm text-muted">No clips on this story yet. Readers will see them under the hero image.</p>
+              ) : (
+                <ul className="space-y-4">
+                  {form.media.map((m, i) => (
+                    <li key={`${m.kind}-${m.url}-${i}`} className="border border-line bg-wash p-3">
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <Badge tone={m.kind === 'youtube' ? 'brand' : m.kind === 'audio' ? 'navy' : 'ink'}>
+                          {m.kind === 'youtube' ? 'YouTube' : m.kind === 'audio' ? 'Audio' : 'Video'}
+                        </Badge>
+                        <Button type="button" size="sm" variant="danger" onClick={() => removeMedia(i)}>
+                          Remove
+                        </Button>
+                      </div>
+                      <MediaPlayer item={m} />
+                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                        <Input
+                          label="Title"
+                          value={m.title || ''}
+                          onChange={(e) => {
+                            const next = [...form.media];
+                            next[i] = { ...m, title: e.target.value };
+                            set({ media: next });
+                          }}
+                        />
+                        <Input
+                          label="Caption"
+                          value={m.caption || ''}
+                          onChange={(e) => {
+                            const next = [...form.media];
+                            next[i] = { ...m, caption: e.target.value };
+                            set({ media: next });
+                          }}
+                        />
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
-            </>
-          )}
+          </Card>
         </div>
 
-        <aside className="space-y-5">
-          {article && current !== 'published' && current !== 'hidden' && (workflow?.assigned_to || editor) && (
-            <Card>
-              <CardHead title="Assignment" />
-              <div className="space-y-3 p-5 text-[15px] leading-snug">
-                {workflow?.assigned_to ? (
-                  <>
-                    <p className="flex items-start gap-2 text-body">
-                      <UserRound className="mt-0.5 h-4 w-4 shrink-0 text-muted" aria-hidden="true" />
-                      <span>
-                        <span className="font-extrabold text-ink">{workflow.assigned_to === member.id ? 'Assigned to you' : `Assigned to ${workflow.assigned_name}`}</span>
-                        {workflow.assigned_by ? ` by ${workflow.assigned_by}` : ''}
-                      </span>
-                    </p>
-                    {workflow.deadline ? (
-                      <p className={cx('font-bold', current === 'scheduled' ? 'text-body' : DUE_TONE[dueLabel(workflow.deadline).tone])}>
-                        {dueLabel(workflow.deadline).text}
-                        <span className="block text-sm font-normal text-muted">{fmtDateTime(workflow.deadline)}</span>
-                      </p>
-                    ) : (
-                      <p className="text-muted">No deadline set.</p>
-                    )}
-                    {workflow.brief && (
-                      <div>
-                        <p className="text-[12px] font-black tracking-[0.08em] text-muted uppercase">Brief</p>
-                        <p className="mt-0.5 break-words whitespace-pre-line text-body">{workflow.brief}</p>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <p className="text-muted">Not assigned to anyone.</p>
-                )}
-                {editor && (
-                  <Button variant="outline" size="sm" onClick={openAssign}>
-                    {workflow?.assigned_to ? 'Change assignment' : 'Assign this story'}
-                  </Button>
-                )}
+        <div className="space-y-4 lg:sticky lg:top-6">
+          <Card className="p-5 space-y-4">
+            <Select label="Category" value={form.section} onChange={(e) => set({ section: e.target.value })} error={fields.section}>
+              <option value="">Choose…</option>
+              {(sections.data ?? []).filter((s) => s.enabled).map((s) => (
+                <option key={s.slug} value={s.slug}>{s.label}</option>
+              ))}
+            </Select>
+            <Input label="Byline" value={form.author_name} onChange={(e) => set({ author_name: e.target.value })} />
+            <div>
+              <span className="mb-1.5 block text-sm font-bold text-ink">Tags</span>
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {form.tags.map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    className="cursor-pointer bg-wash px-2 py-1 text-xs font-bold text-ink hover:bg-brand-tint hover:text-brand"
+                    onClick={() => set({ tags: form.tags.filter((x) => x !== t) })}
+                  >
+                    {t} ×
+                  </button>
+                ))}
               </div>
-            </Card>
-          )}
-          <Card>
-            <CardHead title="Publishing" />
-            <div className="space-y-4 p-5">
-              <div className="flex flex-wrap items-center gap-2 text-[15px]">
-                {current ? <StatusBadge status={current} /> : <span className="inline-flex h-6 items-center bg-wash px-2 text-[12px] font-extrabold tracking-[0.04em] text-body uppercase ring-1 ring-line-strong ring-inset">Not saved yet</span>}
-                {current === 'published' && article?.publish_at && <span className="text-muted">since {fmtDateTime(article.publish_at)}</span>}
-                {current === 'scheduled' && article?.publish_at && <span className="text-muted">for {fmtDateTime(article.publish_at)}</span>}
-              </div>
+              <input
+                value={tagInput}
+                onChange={(e) => setTagInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const t = tagInput.trim();
+                    if (t && !form.tags.includes(t)) set({ tags: [...form.tags, t] });
+                    setTagInput('');
+                  }
+                }}
+                placeholder="Type a tag and press Enter"
+                className="h-11 w-full border border-line-strong px-3 outline-none focus:border-navy focus:ring-2 focus:ring-navy/20"
+              />
+            </div>
 
-              {current === 'published' && article && siteSettings.data?.site_link.sites[0] && (
+            <div>
+              <span className="mb-2 block text-sm font-bold text-ink">Front page</span>
+              <div className="space-y-2">
+                {([
+                  { value: 'none', title: 'Not on the front page', text: 'Section, Latest and search only.' },
+                  { value: 'main', title: 'Main headline', text: 'Leads the front page.' },
+                  { value: 'headline', title: 'Headline news', text: 'Joins the headline strip.' },
+                ] as const).map((p) => (
+                  <label
+                    key={p.value}
+                    className={`flex cursor-pointer gap-3 border p-3 ${form.placement === p.value ? 'border-navy bg-navy-tint' : 'border-line-strong hover:border-ink'}`}
+                  >
+                    <input
+                      type="radio"
+                      name="placement"
+                      className="mt-1 h-4 w-4 accent-navy"
+                      checked={form.placement === p.value}
+                      onChange={() => set({ placement: p.value })}
+                    />
+                    <span>
+                      <span className="block font-bold text-ink">{p.title}</span>
+                      <span className="text-sm text-muted">{p.text}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <span className="mb-2 block text-sm font-bold text-ink">When to publish</span>
+              <div className="mb-2 flex gap-2">
+                <Button type="button" size="sm" variant={form.when === 'now' ? 'navy' : 'outline'} onClick={() => set({ when: 'now' })}>
+                  Now
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={form.when === 'later' ? 'navy' : 'outline'}
+                  onClick={() => set({ when: 'later', publish_local: form.publish_local || toLocalInputValue(new Date(Date.now() + 3600000)) })}
+                >
+                  Later
+                </Button>
+              </div>
+              {form.when === 'later' && (
+                <Input
+                  type="datetime-local"
+                  label="Schedule for"
+                  value={form.publish_local}
+                  onChange={(e) => set({ publish_local: e.target.value })}
+                  error={fields.publish_local}
+                />
+              )}
+            </div>
+          </Card>
+
+          <Card className="p-4 space-y-2">
+            <Button className="w-full" loading={saving} icon={<Save className="h-4 w-4" />} onClick={() => save('draft')}>
+              Save draft
+            </Button>
+            <Button className="w-full" variant="outline" loading={saving} onClick={() => save('review')}>
+              Send for review
+            </Button>
+            {form.when === 'later' ? (
+              <Button className="w-full" variant="navy" loading={saving} icon={<Clock className="h-4 w-4" />} onClick={() => save('scheduled')}>
+                Schedule
+              </Button>
+            ) : (
+              <Button className="w-full" variant="navy" loading={saving} icon={<Send className="h-4 w-4" />} onClick={() => save('published')}>
+                Publish
+              </Button>
+            )}
+            {article?.status === 'published' && (
+              <>
+                <Button className="w-full" variant="outline" loading={saving} icon={<EyeOff className="h-4 w-4" />} onClick={() => save('hidden')}>
+                  Hide from site
+                </Button>
                 <a
-                  href={`${siteSettings.data.site_link.sites[0].origin}${siteStoryPath(article.id)}`}
+                  href={`/site/story/${article.id}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 text-[15px] font-bold text-navy hover:underline"
+                  className="inline-flex h-11 w-full items-center justify-center border border-line-strong bg-paper text-[15px] font-bold text-navy hover:bg-wash"
                 >
-                  <ExternalLink className="h-4 w-4" aria-hidden="true" />
-                  See it on the site
+                  Open on news app ↗
                 </a>
-              )}
-
-              {editor && current !== 'published' && (
-                <fieldset disabled={disabled}>
-                  <legend className="mb-2 text-sm font-bold text-ink">When to publish</legend>
-                  <div className="space-y-2">
-                    {(
-                      [
-                        { value: 'now', label: 'Straight away' },
-                        { value: 'later', label: 'At a set date and time' },
-                      ] as const
-                    ).map((option) => (
-                      <label
-                        key={option.value}
-                        className={cx(
-                          'flex cursor-pointer items-center gap-3 border px-3.5 py-2.5 text-[15px] font-semibold',
-                          form.when === option.value ? 'border-navy bg-navy-tint text-ink' : 'border-line-strong text-body hover:border-ink',
-                        )}
-                      >
-                        <input
-                          type="radio"
-                          name="when"
-                          className="h-4 w-4 accent-navy"
-                          checked={form.when === option.value}
-                          onChange={() => update({ when: option.value })}
-                        />
-                        {option.label}
-                      </label>
-                    ))}
-                  </div>
-                  {form.when === 'later' && (
-                    <TextInput
-                      id="f-publish_at"
-                      wrapClass="mt-3"
-                      label="Date and time"
-                      type="datetime-local"
-                      min={toLocalInput(new Date().toISOString())}
-                      value={form.publish_local}
-                      onChange={(e) => update({ publish_local: e.target.value })}
-                      error={errors.publish_at}
-                      hint="In your own time zone. It goes live on its own."
-                    />
-                  )}
-                </fieldset>
-              )}
-
-              {!editor && !locked && (
-                <p className="text-sm leading-snug text-muted">Submit the story when it is ready. An editor reads it and publishes or schedules it.</p>
-              )}
-
-              {!locked && <div className="hidden flex-col gap-2 lg:flex">{actionButtons(true)}</div>}
-              {editor && current === 'review' && (
-                <Button variant="outline" className="w-full" disabled={saving !== null} onClick={() => saved('sending the story back') && (setNoteError(undefined), setSendBackOpen(true))} icon={<Undo2 className="h-4 w-4" aria-hidden="true" />}>
-                  Send back with a note
-                </Button>
-              )}
-              {editor && current === 'published' && article && (
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  disabled={saving !== null}
-                  onClick={() => {
-                    if (!saved('sending an alert')) return;
-                    setLine(`BREAKING: ${article.headline}`.slice(0, 140));
-                    setPin(article.placement !== 'main');
-                    setBreakingOpen(true);
-                  }}
-                  icon={<Zap className="h-4 w-4 text-brand" aria-hidden="true" />}
-                >
-                  Send breaking-news alert
-                </Button>
-              )}
-            </div>
+              </>
+            )}
+            {article && (
+              <Button className="w-full" variant="danger" icon={<Trash2 className="h-4 w-4" />} onClick={() => setDelOpen(true)}>
+                Delete story
+              </Button>
+            )}
           </Card>
-
-          <Card>
-            <CardHead title="Category and front page" />
-            <div className="space-y-4 p-5">
-              <SelectInput
-                id="f-section"
-                label="Category"
-                disabled={disabled || sections.loading}
-                value={form.section}
-                onChange={(e) => update({ section: e.target.value })}
-                error={errors.section ?? (sections.error ? 'The categories could not be loaded. Reload the page.' : undefined)}
-              >
-                <option value="">{sections.loading ? 'Loading categories…' : 'Choose a category'}</option>
-                {(sections.data ?? []).map((s) => (
-                  <option key={s.slug} value={s.slug}>
-                    {s.label}
-                    {s.enabled ? '' : ' (switched off)'}
-                  </option>
-                ))}
-              </SelectInput>
-
-              {editor ? (
-                <fieldset disabled={disabled}>
-                  <legend className="mb-2 text-sm font-bold text-ink">Where it appears on the front page</legend>
-                  <div className="space-y-2">
-                    {PLACEMENTS.map((option) => (
-                      <label
-                        key={option.value}
-                        className={cx(
-                          'flex cursor-pointer items-start gap-3 border px-3.5 py-2.5',
-                          form.placement === option.value ? 'border-navy bg-navy-tint' : 'border-line-strong hover:border-ink',
-                        )}
-                      >
-                        <input
-                          type="radio"
-                          name="placement"
-                          className="mt-1 h-4 w-4 shrink-0 accent-navy"
-                          checked={form.placement === option.value}
-                          onChange={() => update({ placement: option.value })}
-                        />
-                        <span>
-                          <span className="block text-[15px] font-bold text-ink">{option.title}</span>
-                          <span className="block text-[13.5px] leading-snug text-muted">{option.text}</span>
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
-              ) : (
-                <p className="text-sm leading-snug text-muted">Editors decide whether a story leads the front page.</p>
-              )}
-            </div>
-          </Card>
-
-          <Card>
-            <CardHead title="Picture" />
-            <div className="space-y-4 p-5">
-              <ImagePicker
-                label="Main picture"
-                hint="JPG, PNG or WebP. It is resized to fit."
-                value={form.image_url}
-                disabled={disabled}
-                error={errors.image_url}
-                onChange={pickPicture}
-              />
-              {form.image_url && (
-                <>
-                  {pictureNote?.kind === 'filled' && (
-                    <p role="status" className="border-l-4 border-navy bg-navy-tint px-3 py-2 text-sm leading-snug text-body">
-                      The caption and credit were filled in from the last story that used this picture. Check they still fit.
-                    </p>
-                  )}
-                  {pictureNote?.kind === 'cleared' && (
-                    <p role="status" className="border-l-4 border-warn bg-warn-tint px-3 py-2 text-sm leading-snug text-ink">
-                      The caption and credit were cleared, because they belonged to the picture before.{' '}
-                      <button
-                        type="button"
-                        disabled={disabled}
-                        className="cursor-pointer font-bold text-navy underline"
-                        onClick={() => {
-                          update({ image_caption: pictureNote.caption, image_credit: pictureNote.credit });
-                          setPictureNote(null);
-                        }}
-                      >
-                        Put them back
-                      </button>
-                    </p>
-                  )}
-                  <TextInput
-                    id="f-image_caption"
-                    label="Caption"
-                    optional
-                    disabled={disabled}
-                    maxLength={240}
-                    value={form.image_caption}
-                    onChange={(e) => update({ image_caption: e.target.value })}
-                    hint="What the picture shows."
-                  />
-                  <TextInput
-                    id="f-image_credit"
-                    label="Picture credit"
-                    optional
-                    disabled={disabled}
-                    maxLength={120}
-                    list="picture-credit-list"
-                    autoComplete="off"
-                    placeholder="For example, Thandi Mokoena or Reuters"
-                    value={form.image_credit}
-                    onChange={(e) => update({ image_credit: e.target.value })}
-                    hint="The photographer or agency. Credits used before are suggested as you type."
-                  />
-                  <datalist id="picture-credit-list">
-                    {(pictureCredits.data?.credits ?? []).map((credit) => (
-                      <option key={credit} value={credit} />
-                    ))}
-                  </datalist>
-                  {form.image_credit.trim() || form.image_caption.trim() ? (
-                    <p className="text-sm leading-snug text-muted">
-                      Line under the picture:{' '}
-                      <span className="font-semibold text-body">
-                        {[form.image_caption.trim(), form.image_credit.trim() && `Picture: ${form.image_credit.trim()}`].filter(Boolean).join(' · ')}
-                      </span>
-                      {!form.image_credit.trim() && <span className="font-semibold text-warn-deep"> No credit yet.</span>}
-                    </p>
-                  ) : (
-                    <p className="text-sm leading-snug font-semibold text-warn-deep">No credit yet. Without a caption or credit, the site prints “Picture supplied by the author” under the picture.</p>
-                  )}
-                </>
-              )}
-            </div>
-          </Card>
-
-          <Card>
-            <CardHead title="Byline and tags" />
-            <div className="space-y-4 p-5">
-              <TextInput
-                label="Byline"
-                disabled={disabled}
-                maxLength={60}
-                value={form.author_name}
-                onChange={(e) => update({ author_name: e.target.value })}
-                list="byline-authors"
-                hint="The name readers see on the story. Author profiles are suggested as you type."
-              />
-              <datalist id="byline-authors">
-                {(authorList.data?.authors ?? []).map((a) => (
-                  <option key={a.id} value={a.name} />
-                ))}
-              </datalist>
-              <div id="f-tags" tabIndex={-1}>
-                <TagInput value={form.tags} onChange={(tags) => update({ tags })} suggestions={(tagList.data ?? []).map((t) => t.tag)} error={errors.tags} disabled={disabled} />
-              </div>
-            </div>
-          </Card>
-
-          {canDelete && (
-            <Button variant="danger" className="w-full" disabled={saving !== null} onClick={() => setConfirmDelete(true)} icon={<Trash2 className="h-4 w-4" aria-hidden="true" />}>
-              Delete this story
-            </Button>
-          )}
-        </aside>
+        </div>
       </div>
 
-      {!locked && (
-        <div className="fixed inset-x-0 bottom-0 z-20 flex gap-2 border-t border-line-strong bg-paper p-3 shadow-[0_-6px_18px_rgba(20,22,27,0.08)] lg:hidden">{actionButtons(false)}</div>
-      )}
-
-      {people && article && (
-        <AssignDialog
-          people={people}
-          story={{ id: article.id, headline: article.headline, assigned_to: workflow?.assigned_to ?? null, deadline: workflow?.deadline ?? null, brief: workflow?.brief ?? '' }}
-          onClose={() => setPeople(null)}
-          onDone={(result) => {
-            setPeople(null);
-            setArticle((now) => (now ? { ...now, workflow: result.workflow } : now));
-          }}
-        />
-      )}
-
-      {historyOpen && article && <RevisionsDialog articleId={article.id} now={nowSnapshot} canRestore={!locked} onRestore={restoreVersion} onClose={() => setHistoryOpen(false)} />}
-
-      <Dialog
-        open={sendBackOpen}
-        title="Send this story back"
-        onClose={() => !deskBusy && setSendBackOpen(false)}
-        footer={
-          <>
-            <Button variant="outline" disabled={deskBusy} onClick={() => setSendBackOpen(false)}>
-              Cancel
-            </Button>
-            <Button loading={deskBusy} onClick={sendBack}>
-              Send back
-            </Button>
-          </>
-        }
-      >
-        <p className="mb-4 text-[15px] leading-snug text-body">The story goes back to draft. The reporter is told in Mail, and your note stays at the top of the story until approval is requested again.</p>
-        <TextArea label="What the story needs" rows={5} maxLength={1000} disabled={deskBusy} value={note} onChange={(e) => (setNote(e.target.value), setNoteError(undefined))} error={noteError} className="resize-y" />
-      </Dialog>
-
-      <Dialog
-        open={breakingOpen}
-        title="Send a breaking-news alert"
-        onClose={() => !deskBusy && setBreakingOpen(false)}
-        footer={
-          <>
-            <Button variant="outline" disabled={deskBusy} onClick={() => setBreakingOpen(false)}>
-              Cancel
-            </Button>
-            <Button loading={deskBusy} disabled={!line.trim()} onClick={sendBreaking} icon={<Zap className="h-4 w-4" aria-hidden="true" />}>
-              Send alert
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-4">
-          <TextInput label="Line for the headline crawl" maxLength={140} disabled={deskBusy} value={line} onChange={(e) => setLine(e.target.value)} hint={`${line.length} of 140 characters. It runs first in the moving line across the top of the site, and replaces the line there now.`} />
-          <Toggle label="Pin this story as the lead" description="It becomes the main headline on the front page. The current one moves to the headline news." checked={pin} disabled={deskBusy || article?.placement === 'main'} onChange={setPin} />
-          <p className="border-l-4 border-navy bg-navy-tint px-3.5 py-2.5 text-sm leading-snug text-body">Everyone on the team is also alerted in Mail. Readers are not sent a notification: the alert is the line on the site.</p>
+      {picker && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy-deep/70 p-4">
+          <div className="flex max-h-[85vh] w-full max-w-3xl flex-col border border-line bg-paper shadow-xl">
+            <div className="flex items-center justify-between border-b border-line px-5 py-4">
+              <h3 className="text-lg font-extrabold">
+                {picker === 'clip' ? 'Choose a video or audio clip' : 'Choose from the media library'}
+              </h3>
+              <button type="button" className="cursor-pointer p-1" onClick={() => setPicker(false)} aria-label="Close">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="overflow-y-auto p-4">
+              {media.loading ? (
+                <Spinner />
+              ) : (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  {(media.data ?? [])
+                    .filter((m) =>
+                      picker === 'clip'
+                        ? m.kind === 'video' || m.kind === 'audio' || m.content_type?.startsWith('video/') || m.content_type?.startsWith('audio/')
+                        : m.kind === 'image' || m.content_type?.startsWith('image/')
+                    )
+                    .map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      className="cursor-pointer border border-line hover:border-navy"
+                      onClick={() => {
+                        if (picker === 'image') {
+                          set({ image_url: m.url });
+                        } else {
+                          const kind: MediaEmbed['kind'] =
+                            m.kind === 'audio' || m.content_type?.startsWith('audio/') ? 'audio' : 'video';
+                          set({
+                            media: [
+                              ...form.media,
+                              {
+                                kind,
+                                url: m.url,
+                                youtube_id: null,
+                                title: m.file_name || '',
+                                caption: m.alt || '',
+                                credit: '',
+                                slot: 'top',
+                                width: m.width,
+                                height: m.height,
+                                content_type: m.content_type,
+                                size: m.size,
+                                file_name: m.file_name,
+                              },
+                            ],
+                          });
+                        }
+                        setPicker(false);
+                      }}
+                    >
+                      {m.kind === 'image' || m.content_type?.startsWith('image/') ? (
+                        <img src={m.url} alt={m.alt || ''} className="aspect-video w-full object-cover" />
+                      ) : m.kind === 'video' || m.content_type?.startsWith('video/') ? (
+                        <video src={m.url} className="aspect-video w-full object-cover" muted />
+                      ) : (
+                        <div className="flex aspect-video items-center justify-center bg-navy-tint text-sm font-bold text-navy">Audio</div>
+                      )}
+                      <p className="truncate p-1.5 text-left text-xs font-bold">{m.file_name}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
-      </Dialog>
+      )}
 
-      <ConfirmDialog
-        open={confirmDelete}
-        title="Delete this story for good?"
-        confirmLabel="Delete for good"
-        busy={deleting}
-        onConfirm={remove}
-        onClose={() => !deleting && setConfirmDelete(false)}
-      >
-        <p>
-          <span className="font-bold text-ink">{article?.headline}</span> will be removed from the newsroom and from the site. This cannot be undone.
-        </p>
-      </ConfirmDialog>
-    </div>
+      {delOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy-deep/70 p-4">
+          <div className="w-full max-w-md border border-line bg-paper p-6">
+            <h3 className="text-lg font-extrabold">Delete this story?</h3>
+            <p className="mt-2 text-sm text-muted">This cannot be undone.</p>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setDelOpen(false)}>Cancel</Button>
+              <Button variant="danger" loading={saving} onClick={remove}>Delete</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toast && <Toast message={toast} />}
+    </>
   );
 }

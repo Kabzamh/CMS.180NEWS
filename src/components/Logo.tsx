@@ -1,11 +1,17 @@
-import { cx } from './ui';
+import { cn } from './ui';
 
-/** The 180° News logo, as used on the site. It is drawn for light backgrounds. */
-export function Logo({ markOnly = false }: { markOnly?: boolean }) {
+/** Official 180° News mark — same assets as cms.180news.co.za */
+export default function Logo({ markOnly = false, className }: { markOnly?: boolean; className?: string }) {
   const mark = (
     <picture className="shrink-0">
       <source srcSet="/logo.webp" type="image/webp" />
-      <img src="/logo.png" alt="180° News" width={480} height={274} className={cx('w-auto', markOnly ? 'h-9' : 'h-12')} />
+      <img
+        src="/logo.png"
+        alt="180° News"
+        width={480}
+        height={274}
+        className={cn('w-auto', className || (markOnly ? 'h-9' : 'h-12'))}
+      />
     </picture>
   );
   if (markOnly) return mark;

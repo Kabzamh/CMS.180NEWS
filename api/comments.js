@@ -1,82 +1,73 @@
 import supabase from './db-client.js';
-import { requireMember, logActivity, clean, fail } from './_lib.js';
-
-const STATUSES = ['pending', 'approved', 'rejected', 'spam'];
-const VERB = { approved: 'approved', rejected: 'rejected', spam: 'marked as spam', pending: 'moved back to pending' };
+import { cors, okOptions, fail, requireMember } from './_helpers.js';
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') return res.status(204).end();
+  cors(res);
+  if (okOptions(req, res)) return;
 
   try {
-    const member = await requireMember(req, res, ['owner', 'editor']);
-    if (!member) return;
+    const auth = await requireMember(req);
+    if (auth.error) return fail(res, auth.status, auth.error);
 
     if (req.method === 'GET') {
-      if (req.query.counts) {
-        const { count, error } = await supabase.from('comments').select('id', { count: 'exact', head: true }).eq('status', 'pending');
-        if (error) throw error;
-        return res.status(200).json({ pending: count || 0 });
+      if (req.query.counts === '1') {
+        const { data } = await supabase.from('comments').select('status');
+        const pending = (data || []).filter((c) => c.status === 'pending').length;
+        return res.status(200).json({ pending });
       }
 
-      let query = supabase.from('comments').select('*').order('created_at', { ascending: false }).limit(200);
-      if (STATUSES.includes(req.query.status)) query = query.eq('status', req.query.status);
-      const search = clean(req.query.q, 80).replace(/[%_,()\\]/g, ' ').trim();
-      if (search) query = query.ilike('body', `%${search}%`);
+      let query = supabase
+        .from('comments')
+        .select('*, articles(id, headline)')
+        .order('created_at', { ascending: false });
+      if (req.query.status && req.query.status !== 'all') query = query.eq('status', req.query.status);
+      if (req.query.q) query = query.or(`name.ilike.%${req.query.q}%,body.ilike.%${req.query.q}%`);
 
-      const [list, all] = await Promise.all([query, supabase.from('comments').select('status').limit(10000)]);
-      if (list.error) throw list.error;
-      if (all.error) throw all.error;
-      const counts = { all: all.data.length, pending: 0, approved: 0, rejected: 0, spam: 0 };
-      for (const row of all.data) counts[row.status] = (counts[row.status] || 0) + 1;
+      const { data, error } = await query;
+      if (error) throw error;
 
-      const ids = [...new Set(list.data.map((c) => c.article_id))];
-      const headlines = new Map();
-      if (ids.length) {
-        const { data, error } = await supabase.from('articles').select('id, headline').in('id', ids);
-        if (error) throw error;
-        for (const a of data) headlines.set(a.id, a.headline);
-      }
-      return res.status(200).json({
-        items: list.data.map((c) => ({ ...c, article_headline: headlines.get(c.article_id) || null })),
-        counts,
-      });
+      const items = (data || []).map((c) => ({
+        id: c.id,
+        article_id: c.article_id,
+        name: c.name,
+        body: c.body,
+        status: c.status,
+        created_at: c.created_at,
+        headline: c.articles?.headline || '',
+      }));
+      return res.status(200).json({ items });
     }
 
     if (req.method === 'PUT') {
-      const body = req.body || {};
-      const ids = (Array.isArray(body.ids) ? body.ids : [body.id]).map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 200);
-      if (!ids.length) return res.status(400).json({ error: 'Missing comment.' });
-      if (!STATUSES.includes(body.status)) return res.status(400).json({ error: 'Unknown status.' });
+      if (!['owner', 'editor'].includes(auth.member.role)) {
+        return fail(res, 403, 'Only editors can moderate comments.');
+      }
+      const { id, status } = req.body || {};
+      if (!id || !status) return fail(res, 400, 'Missing id or status.');
       const { data, error } = await supabase
         .from('comments')
-        .update({ status: body.status, moderated_by: member.name, moderated_at: new Date().toISOString() })
-        .in('id', ids)
-        .select('id, author_name');
+        .update({ status })
+        .eq('id', id)
+        .select()
+        .single();
       if (error) throw error;
-      if (data.length) {
-        const what = data.length === 1 ? `a comment from ${data[0].author_name}` : `${data.length} comments`;
-        await logActivity(member, 'updated', 'comment', data.length === 1 ? data[0].id : null, `${member.name} ${VERB[body.status]} ${what}`);
-      }
-      return res.status(200).json({ ok: true, changed: data.length });
+      return res.status(200).json(data);
     }
 
     if (req.method === 'DELETE') {
-      const id = Number(req.body?.id);
-      if (!id) return res.status(400).json({ error: 'Missing comment.' });
-      const { data: existing, error: findError } = await supabase.from('comments').select('id, author_name').eq('id', id).maybeSingle();
-      if (findError) throw findError;
-      if (!existing) return res.status(200).json({ ok: true });
+      if (!['owner', 'editor'].includes(auth.member.role)) {
+        return fail(res, 403, 'Only editors can delete comments.');
+      }
+      const { id } = req.body || {};
+      if (!id) return fail(res, 400, 'Missing id.');
       const { error } = await supabase.from('comments').delete().eq('id', id);
       if (error) throw error;
-      await logActivity(member, 'deleted', 'comment', id, `${member.name} deleted a comment from ${existing.author_name}`);
       return res.status(200).json({ ok: true });
     }
 
-    res.status(405).json({ error: 'Method not allowed' });
+    return fail(res, 405, 'Method not allowed');
   } catch (err) {
-    fail(res, err);
+    console.error('comments error:', err);
+    return fail(res, 500, err.message || 'Server error');
   }
 }

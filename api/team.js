@@ -1,218 +1,235 @@
 import supabase from './db-client.js';
-import { authorsHandler } from './_authors.js';
-import { mailHandler } from './_mail.js';
-import { notesHandler, removeNotesOf } from './_notes.js';
-import { deskHandler } from './_desk.js';
-import { requireMember, logActivity, clean, fail, ROLES, listAuthUsers, listMembers, memberFromUser, memberMeta, setMemberMeta } from './_lib.js';
-
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
-
-const present = (m) => ({
-  id: m.id,
-  name: m.name,
-  email: m.email,
-  role: m.role,
-  active: m.active,
-  created_at: m.created_at,
-  last_seen_at: m.last_seen_at,
-});
-
-const roleWords = (role) => (role === 'owner' ? 'an admin' : role === 'editor' ? 'an editor' : 'a reporter');
-
-/*
- * Member numbers are never handed out twice. Mail, assignments and the stories a person wrote are kept under
- * their number, so a number freed by removing someone must not pass to the next person added.
- */
-async function highestNumberUsed(users) {
-  const { data } = await supabase.from('settings').select('value').eq('key', 'member_seq').maybeSingle();
-  return Math.max(Number(data?.value?.last) || 0, users.reduce((max, u) => Math.max(max, memberFromUser(u)?.id || 0), 0));
-}
-const rememberNumber = (last) => supabase.from('settings').upsert({ key: 'member_seq', value: { last }, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+import { cors, okOptions, fail, requireMember, requireUser } from './_helpers.js';
+import { queueNotification } from './notifications.js';
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') return res.status(204).end();
+  cors(res);
+  if (okOptions(req, res)) return;
 
   try {
-    if (req.query.resource === 'authors') return await authorsHandler(req, res);
-    if (req.query.resource === 'mail') return await mailHandler(req, res);
-    if (req.query.resource === 'notes') return await notesHandler(req, res);
-    if (req.query.resource === 'desk') return await deskHandler(req, res);
+    // GET me / authors can run with auth checks below
+    if (req.method === 'GET' && (req.query.me === '1' || req.query.resource === 'me')) {
+      const auth = await requireMember(req);
+      if (auth.error) return fail(res, auth.status, auth.error);
+      return res.status(200).json(auth.member);
+    }
 
+    const auth = await requireMember(req);
+    if (auth.error) return fail(res, auth.status, auth.error);
+
+    // Authors resource
+    if (req.query.resource === 'authors' || req.query.authors === '1') {
+      if (req.method === 'GET') {
+        const { data, error } = await supabase
+          .from('authors')
+          .select('*')
+          .order('name', { ascending: true });
+        if (error) throw error;
+        const { data: arts } = await supabase.from('articles').select('author_name, author_id');
+        const byId = {};
+        const byName = {};
+        for (const a of arts || []) {
+          if (a.author_id) byId[a.author_id] = (byId[a.author_id] || 0) + 1;
+          if (a.author_name) byName[a.author_name.toLowerCase()] = (byName[a.author_name.toLowerCase()] || 0) + 1;
+        }
+        const authors = (data || []).map((au) => ({
+          ...au,
+          stories: byId[au.id] || byName[(au.name || '').toLowerCase()] || 0,
+        }));
+        return res.status(200).json({ authors });
+      }
+
+      if (req.method === 'POST') {
+        if (!['owner', 'editor'].includes(auth.member.role)) {
+          return fail(res, 403, 'Only editors can add authors.');
+        }
+        const b = req.body || {};
+        const name = String(b.name || '').trim();
+        if (name.length < 2) return fail(res, 400, 'Check the form.', { name: 'Enter a name.' });
+        const { data, error } = await supabase
+          .from('authors')
+          .insert({
+            name,
+            title: b.title || '',
+            bio: b.bio || '',
+            email: b.email || '',
+            photo_url: b.photo_url || null,
+            active: b.active !== false,
+          })
+          .select()
+          .single();
+        if (error) throw error;
+        return res.status(201).json({ ...data, stories: 0, renamed: 0 });
+      }
+
+      if (req.method === 'PUT') {
+        if (!['owner', 'editor'].includes(auth.member.role)) {
+          return fail(res, 403, 'Only editors can edit authors.');
+        }
+        const b = req.body || {};
+        if (!b.id) return fail(res, 400, 'Missing author id.');
+        const { data: prev } = await supabase.from('authors').select('*').eq('id', b.id).maybeSingle();
+        if (!prev) return fail(res, 404, 'Author not found.');
+        const patch = {};
+        for (const k of ['name', 'title', 'bio', 'email', 'photo_url', 'active']) {
+          if (b[k] !== undefined) patch[k] = b[k];
+        }
+        const { data, error } = await supabase.from('authors').update(patch).eq('id', b.id).select().single();
+        if (error) throw error;
+        let renamed = 0;
+        if (patch.name && patch.name !== prev.name) {
+          const { data: arts } = await supabase.from('articles').select('id').eq('author_name', prev.name);
+          for (const a of arts || []) {
+            await supabase.from('articles').update({ author_name: patch.name }).eq('id', a.id);
+            renamed += 1;
+          }
+        }
+        return res.status(200).json({ ...data, renamed });
+      }
+
+      if (req.method === 'DELETE') {
+        if (!['owner', 'editor'].includes(auth.member.role)) {
+          return fail(res, 403, 'Only editors can remove authors.');
+        }
+        const { id } = req.body || {};
+        if (!id) return fail(res, 400, 'Missing author id.');
+        const { error } = await supabase.from('authors').delete().eq('id', id);
+        if (error) throw error;
+        return res.status(200).json({ ok: true });
+      }
+    }
+
+    // Team members
     if (req.method === 'GET') {
-      if (req.query.me) {
-        const member = await requireMember(req, res);
-        if (!member) return;
-        return res.status(200).json(present(member));
-      }
-      if (req.query.authors) {
-        const member = await requireMember(req, res);
-        if (!member) return;
-        const members = await listMembers();
-        return res.status(200).json(
-          members
-            .map((m) => ({ id: m.id, name: m.name, role: m.role }))
-            .sort((a, b) => a.name.localeCompare(b.name)),
-        );
-      }
-      const member = await requireMember(req, res, ['owner']);
-      if (!member) return;
-      return res.status(200).json((await listMembers()).map(present));
+      const { data, error } = await supabase
+        .from('team_members')
+        .select('id, user_id, name, email, role, active, created_at')
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+      return res.status(200).json(data || []);
     }
 
     if (req.method === 'POST') {
-      const member = await requireMember(req, res, ['owner']);
-      if (!member) return;
-      const name = clean(req.body?.name, 80);
-      const email = clean(req.body?.email, 160).toLowerCase();
-      const role = req.body?.role;
-      const password = typeof req.body?.password === 'string' ? req.body.password : '';
+      if (auth.member.role !== 'owner') return fail(res, 403, 'Only the owner can add users.');
+      const b = req.body || {};
+      const name = String(b.name || '').trim();
+      const email = String(b.email || '').trim().toLowerCase();
+      const password = String(b.password || '');
+      const role = ['owner', 'editor', 'writer'].includes(b.role) ? b.role : 'writer';
       const fields = {};
       if (name.length < 2) fields.name = 'Enter their name.';
-      if (!EMAIL.test(email)) fields.email = 'Enter a valid email address, for example thandi@180news.co.za.';
-      if (!ROLES.includes(role)) fields.role = 'Choose a role.';
+      if (!/[^\s@]+@[^\s@]+\.[^\s@]{2,}/.test(email)) fields.email = 'Enter their email address.';
       if (password.length < 8) fields.password = 'Use at least 8 characters.';
+      if (Object.keys(fields).length) return fail(res, 400, 'Check the form.', fields);
 
-      const users = await listAuthUsers();
-      const existing = users.find((u) => (u.email || '').toLowerCase() === email);
-      if (!fields.email && existing && memberFromUser(existing)) fields.email = 'Someone with this email is already on the team.';
-      if (Object.keys(fields).length) return res.status(400).json({ error: 'Check the highlighted fields.', fields });
-
-      const memberId = (await highestNumberUsed(users)) + 1;
-      await rememberNumber(memberId);
-      const meta = { role, active: true, member_id: memberId, name, added_at: new Date().toISOString() };
-
-      let saved;
-      if (existing) {
-        const { data, error } = await supabase.auth.admin.updateUserById(existing.id, {
-          password,
-          email_confirm: true,
-          app_metadata: memberMeta(existing, meta),
-        });
-        if (error) throw error;
-        saved = data.user;
-      } else {
-        const { data, error } = await supabase.auth.admin.createUser({
-          email,
-          password,
-          email_confirm: true,
-          app_metadata: memberMeta(null, meta),
-        });
-        if (error) throw error;
-        saved = data.user;
+      const { data: created, error: createErr } = await supabase.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: { name, role },
+      });
+      if (createErr) {
+        return fail(res, 400, createErr.message || 'Could not create user.');
       }
-      const created = memberFromUser(saved);
-      await logActivity(member, 'created', 'team', created.id, `${member.name} added ${name} to the team as ${roleWords(role)}`);
-      return res.status(201).json(present(created));
+
+      const { data, error } = await supabase
+        .from('team_members')
+        .insert({
+          user_id: created.user.id,
+          name,
+          email,
+          role,
+          active: true,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+
+      try {
+        await queueNotification({
+          kind: 'team',
+          title: `Team: ${name} joined`,
+          body: `${name} (${email}) added as ${role}.`,
+          link: '/users',
+          onlyIf: (prefs) => prefs.notify_team && prefs.digest !== 'off',
+        });
+      } catch (_) {}
+      return res.status(201).json({ ...data, password });
     }
 
     if (req.method === 'PUT') {
-      const body = req.body || {};
+      const b = req.body || {};
 
-      if (body.action === 'my_profile') {
-        const member = await requireMember(req, res);
-        if (!member) return;
-        const name = clean(body.name, 80);
-        if (name.length < 2) return res.status(400).json({ error: 'Enter your name.', fields: { name: 'Enter your name.' } });
-        const updated = await setMemberMeta(member.user, { name });
-        return res.status(200).json(present(memberFromUser(updated)));
+      if (b.action === 'my_profile') {
+        const name = String(b.name || '').trim();
+        if (name.length < 2) return fail(res, 400, 'Check the form.', { name: 'Enter your name.' });
+        const { data, error } = await supabase
+          .from('team_members')
+          .update({ name })
+          .eq('user_id', auth.user.id)
+          .select()
+          .single();
+        if (error) throw error;
+        return res.status(200).json(data);
       }
 
-      if (body.action === 'my_password') {
-        const member = await requireMember(req, res);
-        if (!member) return;
-        const password = typeof body.password === 'string' ? body.password : '';
+      if (b.action === 'my_password') {
+        const password = String(b.password || '');
         if (password.length < 8) {
-          return res.status(400).json({ error: 'Use at least 8 characters.', fields: { password: 'Use at least 8 characters.' } });
+          return fail(res, 400, 'Check the form.', { password: 'Use at least 8 characters.' });
         }
-        const { error } = await supabase.auth.admin.updateUserById(member.uid, { password });
-        if (error) throw error;
-        // The starter sign-in details stop being advertised once that account has its own password.
-        const { data: demo } = await supabase.from('settings').select('value').eq('key', 'demo_login').maybeSingle();
-        if (demo?.value?.email && String(demo.value.email).toLowerCase() === member.email) {
-          await supabase.from('settings').delete().eq('key', 'demo_login');
-        }
+        const { error } = await supabase.auth.admin.updateUserById(auth.user.id, { password });
+        if (error) return fail(res, 400, error.message);
         return res.status(200).json({ ok: true });
       }
 
-      const member = await requireMember(req, res, ['owner']);
-      if (!member) return;
-      const id = Number(body.id);
-      if (!id) return res.status(400).json({ error: 'Missing team member.' });
-      const users = await listAuthUsers();
-      const targetUser = users.find((u) => memberFromUser(u)?.id === id);
-      if (!targetUser) return res.status(404).json({ error: 'That team member no longer exists.' });
-      const target = memberFromUser(targetUser);
-      const otherOwners = users.map(memberFromUser).filter((m) => m && m.id !== id && m.role === 'owner' && m.active).length;
+      if (auth.member.role !== 'owner') return fail(res, 403, 'Only the owner can update users.');
+      if (!b.id) return fail(res, 400, 'Missing user id.');
+
+      const { data: target } = await supabase.from('team_members').select('*').eq('id', b.id).maybeSingle();
+      if (!target) return fail(res, 404, 'User not found.');
+
+      if (b.password) {
+        if (String(b.password).length < 8) {
+          return fail(res, 400, 'Check the form.', { password: 'Use at least 8 characters.' });
+        }
+        const { error } = await supabase.auth.admin.updateUserById(target.user_id, { password: b.password });
+        if (error) return fail(res, 400, error.message);
+        return res.status(200).json({ ok: true });
+      }
 
       const patch = {};
-      if (body.name !== undefined) {
-        const name = clean(body.name, 80);
-        if (name.length < 2) return res.status(400).json({ error: 'Enter their name.', fields: { name: 'Enter their name.' } });
-        patch.name = name;
-      }
-      if (body.role !== undefined) {
-        if (!ROLES.includes(body.role)) return res.status(400).json({ error: 'Choose a role.' });
-        patch.role = body.role;
-      }
-      if (typeof body.active === 'boolean') patch.active = body.active;
+      if (b.name !== undefined) patch.name = b.name;
+      if (b.role !== undefined && ['owner', 'editor', 'writer'].includes(b.role)) patch.role = b.role;
+      if (b.active !== undefined) patch.active = !!b.active;
 
-      const losesOwner = target.role === 'owner' && target.active && ((patch.role && patch.role !== 'owner') || patch.active === false);
-      if (losesOwner && otherOwners === 0) {
-        return res.status(400).json({ error: 'The newsroom needs at least one admin. Make someone else an admin first.' });
-      }
-      if (target.id === member.id && patch.active === false) {
-        return res.status(400).json({ error: 'You cannot switch off your own access.' });
-      }
-
-      if (body.password !== undefined) {
-        const password = typeof body.password === 'string' ? body.password : '';
-        if (password.length < 8) {
-          return res.status(400).json({ error: 'Use at least 8 characters.', fields: { password: 'Use at least 8 characters.' } });
-        }
-        const { error } = await supabase.auth.admin.updateUserById(targetUser.id, { password });
-        if (error) throw error;
-        await logActivity(member, 'updated', 'team', id, `${member.name} reset the password for ${target.name}`);
-      }
-
-      if (!Object.keys(patch).length) return res.status(200).json(present(target));
-
-      const updated = memberFromUser(await setMemberMeta(targetUser, patch));
-      if (patch.role && patch.role !== target.role) {
-        await logActivity(member, 'updated', 'team', id, `${member.name} made ${updated.name} ${roleWords(patch.role)}`);
-      }
-      if (patch.active !== undefined && patch.active !== target.active) {
-        await logActivity(member, 'updated', 'team', id, `${member.name} ${patch.active ? 'restored' : 'switched off'} access for ${updated.name}`);
-      }
-      return res.status(200).json(present(updated));
+      const { data, error } = await supabase
+        .from('team_members')
+        .update(patch)
+        .eq('id', b.id)
+        .select()
+        .single();
+      if (error) throw error;
+      return res.status(200).json(data);
     }
 
     if (req.method === 'DELETE') {
-      const member = await requireMember(req, res, ['owner']);
-      if (!member) return;
-      const id = Number(req.body?.id);
-      if (!id) return res.status(400).json({ error: 'Missing team member.' });
-      if (id === member.id) return res.status(400).json({ error: 'You cannot remove yourself from the team.' });
-      const users = await listAuthUsers();
-      const targetUser = users.find((u) => memberFromUser(u)?.id === id);
-      if (!targetUser) return res.status(200).json({ ok: true });
-      const target = memberFromUser(targetUser);
-      const otherOwners = users.map(memberFromUser).filter((m) => m && m.id !== id && m.role === 'owner' && m.active).length;
-      if (target.role === 'owner' && target.active && otherOwners === 0) {
-        return res.status(400).json({ error: 'The newsroom needs at least one admin.' });
-      }
-      await rememberNumber(await highestNumberUsed(users)); // so this person's number is not given to anyone else
-      const { error } = await supabase.auth.admin.deleteUser(targetUser.id);
-      if (error) throw error;
-      await removeNotesOf(targetUser.id); // their private notepad goes with the account
-      await logActivity(member, 'deleted', 'team', id, `${member.name} removed ${target.name} from the team`);
+      if (auth.member.role !== 'owner') return fail(res, 403, 'Only the owner can remove users.');
+      const { id } = req.body || {};
+      if (!id) return fail(res, 400, 'Missing user id.');
+      const { data: target } = await supabase.from('team_members').select('*').eq('id', id).maybeSingle();
+      if (!target) return fail(res, 404, 'User not found.');
+      if (target.user_id === auth.user.id) return fail(res, 400, 'You cannot remove yourself.');
+      await supabase.from('team_members').delete().eq('id', id);
+      try {
+        await supabase.auth.admin.deleteUser(target.user_id);
+      } catch (_) {}
       return res.status(200).json({ ok: true });
     }
 
-    res.status(405).json({ error: 'Method not allowed' });
+    return fail(res, 405, 'Method not allowed');
   } catch (err) {
-    fail(res, err);
+    console.error('team error:', err);
+    return fail(res, 500, err.message || 'Server error');
   }
 }

@@ -1,86 +1,110 @@
 import supabase from './db-client.js';
-import { requireMember, logActivity, clean, slugify, canEdit, fail } from './_lib.js';
-import { AV_BUCKET, avKind, clipsHandler } from './_clips.js';
+import { cors, okOptions, fail, requireMember } from './_helpers.js';
 
-const BUCKET = 'newsroom-media';
-const TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
-const MAX_BYTES = 3.4 * 1024 * 1024;
+const BUCKET = 'news-media';
+
+function kindFromType(ct = '') {
+  if (ct.startsWith('video/')) return 'video';
+  if (ct.startsWith('audio/')) return 'audio';
+  return 'image';
+}
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') return res.status(204).end();
+  cors(res);
+  if (okOptions(req, res)) return;
 
   try {
-    if (req.query.resource === 'clips') return await clipsHandler(req, res);
-
-    const member = await requireMember(req, res);
-    if (!member) return;
+    const auth = await requireMember(req);
+    if (auth.error) return fail(res, auth.status, auth.error);
 
     if (req.method === 'GET') {
-      const [media, articles, ads, clips] = await Promise.all([
-        supabase.from('media').select('*').order('created_at', { ascending: false }).limit(500),
-        supabase.from('articles').select('image_url').not('image_url', 'is', null).limit(5000),
-        supabase.from('ads').select('image_url').not('image_url', 'is', null),
-        supabase.from('article_media').select('url').neq('kind', 'youtube').limit(5000),
-      ]);
-      if (media.error) throw media.error;
-      if (articles.error) throw articles.error;
-      if (ads.error) throw ads.error;
-      if (clips.error) throw clips.error;
-      const used = new Set([...articles.data.map((r) => r.image_url), ...ads.data.map((r) => r.image_url), ...clips.data.map((r) => r.url)]);
-      return res.status(200).json(media.data.map((m) => ({ ...m, in_use: used.has(m.url) })));
+      const { data, error } = await supabase
+        .from('media_assets')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return res.status(200).json(data || []);
+    }
+
+    if (req.method === 'POST' && req.query.resource === 'clips') {
+      const body = req.body || {};
+      if (body.action === 'sign') {
+        const fileName = body.fileName || `clip-${Date.now()}`;
+        const safe = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const path = `clips/${Date.now()}-${safe}`;
+        const { data, error } = await supabase.storage.from(BUCKET).createSignedUploadUrl(path);
+        if (error) {
+          // Fallback: client will use base64 upload
+          return res.status(200).json({ path, signedUrl: null, token: null, fallback: true });
+        }
+        return res.status(200).json({ path, signedUrl: data.signedUrl, token: data.token });
+      }
+      if (body.action === 'complete') {
+        const path = body.path;
+        if (!path) return fail(res, 400, 'Missing path.');
+        const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(path);
+        const contentType = body.contentType || 'application/octet-stream';
+        const row = {
+          url: urlData.publicUrl,
+          file_name: body.fileName || path.split('/').pop(),
+          content_type: contentType,
+          alt: '',
+          width: body.width || null,
+          height: body.height || null,
+          size: body.size || null,
+          path,
+          kind: kindFromType(contentType),
+          uploaded_by: auth.user.id,
+          created_at: new Date().toISOString(),
+        };
+        const { data, error } = await supabase.from('media_assets').insert(row).select().single();
+        if (error) throw error;
+        return res.status(201).json(data);
+      }
+      return fail(res, 400, 'Unknown clip action.');
     }
 
     if (req.method === 'POST') {
-      const { fileName, fileBase64, contentType } = req.body || {};
-      const ext = TYPES[contentType];
-      if (!ext) return res.status(400).json({ error: 'Use a JPG, PNG, WebP or GIF image.' });
-      if (typeof fileBase64 !== 'string' || !fileBase64) return res.status(400).json({ error: 'The image did not arrive. Try again.' });
+      const body = req.body || {};
+      const { fileName, fileBase64, contentType, width, height, alt } = body;
+      if (!fileBase64 || !fileName) return fail(res, 400, 'Missing file data.');
+
+      const safe = String(fileName).replace(/[^a-zA-Z0-9._-]/g, '_');
+      const path = `uploads/${Date.now()}-${safe}`;
       const buffer = Buffer.from(fileBase64, 'base64');
-      if (!buffer.length) return res.status(400).json({ error: 'The image did not arrive. Try again.' });
-      if (buffer.length > MAX_BYTES) return res.status(400).json({ error: 'That image is too large. Use one under 3 MB.' });
+      const ct = contentType || 'application/octet-stream';
 
-      const original = clean(fileName, 120) || `image.${ext}`;
-      const base = slugify(original.replace(/\.[a-z0-9]+$/i, '')) || 'image';
-      const now = new Date();
-      const path = `${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}/${now.getTime()}-${base}.${ext}`;
+      const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, buffer, {
+        contentType: ct,
+        upsert: true,
+      });
+      if (upErr) throw upErr;
 
-      const { error: uploadError } = await supabase.storage.from(BUCKET).upload(path, buffer, { contentType, upsert: false });
-      if (uploadError) throw uploadError;
       const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(path);
-
-      const { data, error } = await supabase
-        .from('media')
-        .insert({
-          file_name: original,
-          path,
-          url: urlData.publicUrl,
-          content_type: contentType,
-          size: buffer.length,
-          width: Number(req.body.width) > 0 ? Math.round(Number(req.body.width)) : null,
-          height: Number(req.body.height) > 0 ? Math.round(Number(req.body.height)) : null,
-          alt: clean(req.body.alt, 200),
-          uploaded_by: member.name,
-          uploader_id: member.id,
-          created_at: now.toISOString(),
-        })
-        .select()
-        .single();
-      if (error) {
-        await supabase.storage.from(BUCKET).remove([path]);
-        throw error;
-      }
-      return res.status(201).json({ ...data, in_use: false });
+      const row = {
+        url: urlData.publicUrl,
+        file_name: fileName,
+        content_type: ct,
+        alt: alt || '',
+        width: width || null,
+        height: height || null,
+        size: buffer.length,
+        path,
+        kind: kindFromType(ct),
+        uploaded_by: auth.user.id,
+        created_at: new Date().toISOString(),
+      };
+      const { data, error } = await supabase.from('media_assets').insert(row).select().single();
+      if (error) throw error;
+      return res.status(201).json(data);
     }
 
     if (req.method === 'PUT') {
-      const id = Number(req.body?.id);
-      if (!id) return res.status(400).json({ error: 'Missing image id.' });
+      const { id, alt } = req.body || {};
+      if (!id) return fail(res, 400, 'Missing media id.');
       const { data, error } = await supabase
-        .from('media')
-        .update({ alt: clean(req.body.alt, 200) })
+        .from('media_assets')
+        .update({ alt: alt ?? '' })
         .eq('id', id)
         .select()
         .single();
@@ -89,33 +113,23 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'DELETE') {
-      const id = Number(req.body?.id);
-      if (!id) return res.status(400).json({ error: 'Missing image id.' });
-      const { data: item, error: findError } = await supabase.from('media').select('*').eq('id', id).maybeSingle();
-      if (findError) throw findError;
-      if (!item) return res.status(200).json({ ok: true });
-      if (!canEdit(member) && item.uploader_id !== member.id) {
-        return res.status(403).json({ error: 'Reporters can only delete images they uploaded.' });
+      const { id } = req.body || {};
+      if (!id) return fail(res, 400, 'Missing media id.');
+      const { data: row } = await supabase.from('media_assets').select('*').eq('id', id).maybeSingle();
+      if (!row) return fail(res, 404, 'Media not found.');
+      if (row.path) {
+        try {
+          await supabase.storage.from(BUCKET).remove([row.path]);
+        } catch (_) {}
       }
-      const kind = avKind(item.content_type);
-      if (kind) {
-        // A deleted clip comes off any story that carries it, so readers never get a dead player.
-        const { error: detachError } = await supabase.from('article_media').delete().eq('url', item.url);
-        if (detachError) throw detachError;
-      }
-      if (item.path) {
-        const { error: removeError } = await supabase.storage.from(kind ? AV_BUCKET : BUCKET).remove([item.path]);
-        if (removeError) console.error('storage remove failed:', removeError);
-      }
-      const { error } = await supabase.from('media').delete().eq('id', id);
+      const { error } = await supabase.from('media_assets').delete().eq('id', id);
       if (error) throw error;
-      const what = kind === 'video' ? 'video' : kind === 'audio' ? 'audio clip' : 'image';
-      await logActivity(member, 'deleted', 'media', id, `${member.name} deleted the ${what} ${item.file_name}`);
       return res.status(200).json({ ok: true });
     }
 
-    res.status(405).json({ error: 'Method not allowed' });
+    return fail(res, 405, 'Method not allowed');
   } catch (err) {
-    fail(res, err);
+    console.error('media error:', err);
+    return fail(res, 500, err.message || 'Server error');
   }
 }

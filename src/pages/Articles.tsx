@@ -1,307 +1,200 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { FileText, Pencil, Plus, Search, Trash2 } from 'lucide-react';
-import { api, ApiError, errorMessage } from '../lib/api';
-import { useMember } from '../contexts/AuthContext';
-import { useDebounced, useLoad } from '../hooks/useLoad';
-import { canEdit, type Article, type ArticleStatus, type Author, type Section } from '../lib/types';
-import { fmtShort, timeAgo } from '../lib/format';
-import { MediaBadges } from '../components/ClipPlayer';
-import {
-  Button,
-  ConfirmDialog,
-  EmptyState,
-  ErrorState,
-  IconButton,
-  PageHeader,
-  Pill,
-  SkeletonRows,
-  StatusBadge,
-  buttonClass,
-  cx,
-  inputClass,
-  useToast,
-} from '../components/ui';
-
-const TABS: { key: string; label: string }[] = [
-  { key: '', label: 'All' },
-  { key: 'published', label: 'Published' },
-  { key: 'scheduled', label: 'Scheduled' },
-  { key: 'review', label: 'In review' },
-  { key: 'draft', label: 'Drafts' },
-  { key: 'hidden', label: 'Hidden' },
-];
-
-interface ListResponse {
-  items: Article[];
-  counts: Record<string, number>;
-}
-
-function dateLine(a: Article) {
-  if (a.status === 'published') return `Published ${fmtShort(a.publish_at)}`;
-  if (a.status === 'scheduled') return `Goes live ${fmtShort(a.publish_at)}`;
-  return `Edited ${timeAgo(a.updated_at)}`;
-}
+import { PenLine, Trash2, Search } from 'lucide-react';
+import { useApi } from '../hooks/useApi';
+import { api, errMsg } from '../lib/api';
+import { useAuth } from '../contexts/AuthContext';
+import { PageHeader, Card, Button, Badge, Spinner, ErrorBox, Empty, fmtDate, Toast, Select } from '../components/ui';
+import type { Article, Section, Author } from '../lib/types';
 
 export default function Articles() {
-  const member = useMember();
-  const editor = canEdit(member);
-  const toast = useToast();
+  const { member } = useAuth();
   const [params, setParams] = useSearchParams();
-  const status = params.get('status') ?? '';
-  const section = params.get('section') ?? '';
-  const author = params.get('author') ?? '';
-  const [search, setSearch] = useState(params.get('q') ?? '');
-  const query = useDebounced(search.trim(), 300);
-  const urlQuery = params.get('q') ?? '';
+  const status = params.get('status') || '';
+  const section = params.get('section') || '';
+  const author = params.get('author') || '';
+  const q = params.get('q') || '';
+  const [qInput, setQInput] = useState(q);
+  const [busy, setBusy] = useState<number | null>(null);
+  const [toast, setToast] = useState<{ msg: string; tone?: 'ok' | 'error' } | null>(null);
+  const [delId, setDelId] = useState<number | null>(null);
 
-  useEffect(() => {
-    setSearch((current) => (current.trim() === urlQuery ? current : urlQuery));
-  }, [urlQuery]);
+  const qs = useMemo(() => {
+    const p = new URLSearchParams();
+    if (status) p.set('status', status);
+    if (section) p.set('section', section);
+    if (author) p.set('author', author);
+    if (q) p.set('q', q);
+    return p.toString();
+  }, [status, section, author, q]);
 
-  const [busyId, setBusyId] = useState<number | null>(null);
-  const [toDelete, setToDelete] = useState<Article | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  const list = useApi<{ items: Article[]; counts: Record<string, number> }>(
+    () => api(`/api/articles?${qs}`),
+    [qs]
+  );
+  const sections = useApi<Section[]>(() => api('/api/sections'), []);
+  useApi<{ authors: Author[] }>(() => api('/api/team?authors=1'), []);
 
   useEffect(() => {
     document.title = 'Articles · 180news Newsroom CMS';
   }, []);
 
-  const sections = useLoad(() => api<Section[]>('/api/sections'), []);
-  const authors = useLoad(() => api<Author[]>('/api/team?authors=1'), []);
-  const list = useLoad(() => {
-    const qs = new URLSearchParams();
-    if (status) qs.set('status', status);
-    if (section) qs.set('section', section);
-    if (author) qs.set('author', author);
-    if (query) qs.set('q', query);
-    return api<ListResponse>(`/api/articles?${qs.toString()}`);
-  }, [status, section, author, query]);
+  useEffect(() => setQInput(q), [q]);
 
-  const setParam = (key: string, value: string) => {
+  const setFilter = (key: string, val: string) => {
     const next = new URLSearchParams(params);
-    if (value) next.set(key, value);
+    if (val) next.set(key, val);
     else next.delete(key);
     setParams(next, { replace: true });
   };
 
-  const sectionMap = new Map((sections.data ?? []).map((s) => [s.slug, s]));
-  const filtered = Boolean(status || section || author || query);
-
-  const canChange = (a: Article) => editor || (a.author_id === member.id && (a.status === 'draft' || a.status === 'review'));
-  const canDelete = (a: Article) => editor || (a.author_id === member.id && a.status === 'draft');
-
-  const setStatus = async (a: Article, next: ArticleStatus) => {
-    setBusyId(a.id);
+  const setStatus = async (a: Article, st: string) => {
+    setBusy(a.id);
     try {
-      await api('/api/articles', { method: 'PUT', body: { id: a.id, status: next } });
-      toast(next === 'published' ? 'Published. It is live on the site feed.' : 'Hidden from the site.');
+      await api('/api/articles', { method: 'PUT', body: { id: a.id, status: st } });
+      setToast({ msg: st === 'published' ? 'Published. It is live on the site feed.' : 'Hidden from the site.' });
       await list.reload(true);
-    } catch (err) {
-      const detail = err instanceof ApiError && err.fields ? Object.values(err.fields)[0] : null;
-      toast(detail ? `Could not publish yet. ${detail}` : errorMessage(err), 'error');
+    } catch (e) {
+      setToast({ msg: errMsg(e), tone: 'error' });
     } finally {
-      setBusyId(null);
+      setBusy(null);
+      setTimeout(() => setToast(null), 3000);
     }
   };
 
-  const confirmDelete = async () => {
-    if (!toDelete) return;
-    setDeleting(true);
+  const remove = async () => {
+    if (!delId) return;
+    setBusy(delId);
     try {
-      await api('/api/articles', { method: 'DELETE', body: { id: toDelete.id } });
-      toast('Story deleted.');
-      setToDelete(null);
+      await api('/api/articles', { method: 'DELETE', body: { id: delId } });
+      setToast({ msg: 'Story deleted.' });
+      setDelId(null);
       await list.reload(true);
-    } catch (err) {
-      toast(errorMessage(err), 'error');
+    } catch (e) {
+      setToast({ msg: errMsg(e), tone: 'error' });
     } finally {
-      setDeleting(false);
+      setBusy(null);
+      setTimeout(() => setToast(null), 3000);
     }
   };
 
   const items = list.data?.items ?? [];
-  const counts = list.data?.counts;
+  const secMap = new Map((sections.data ?? []).map((s) => [s.slug, s]));
 
   return (
     <>
       <PageHeader
-        eyebrow="Newsroom"
+        eyebrow="Desk"
         title="Articles"
-        description="Every story the team has written, whatever stage it is at."
+        description="Write, review, schedule and publish stories for the 180news front page."
+        actions={
+          <Link to="/articles/new">
+            <Button icon={<PenLine className="h-4 w-4" />}>New story</Button>
+          </Link>
+        }
       />
 
-      <div className="-mx-4 mb-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-        <div role="group" aria-label="Filter by status" className="flex w-max gap-1.5">
-          {TABS.map((tab) => {
-            const active = status === tab.key;
-            const count = counts ? counts[tab.key || 'all'] ?? 0 : null;
-            return (
-              <button
-                key={tab.key}
-                type="button"
-                aria-pressed={active}
-                onClick={() => setParam('status', tab.key)}
-                className={cx(
-                  'inline-flex h-10 shrink-0 cursor-pointer items-center gap-2 border px-3.5 text-[15px] font-bold whitespace-nowrap transition-colors',
-                  active ? 'border-ink bg-ink text-white' : 'border-line-strong bg-paper text-body hover:border-ink hover:text-ink',
-                )}
-              >
-                {tab.label}
-                {count !== null && <span className={cx('text-[13px] font-extrabold tabular-nums', active ? 'text-white/80' : 'text-muted')}>{count}</span>}
-              </button>
-            );
-          })}
+      <Card className="mb-4">
+        <div className="flex flex-col gap-3 p-4 sm:flex-row sm:flex-wrap sm:items-end">
+          <div className="relative min-w-[200px] flex-1">
+            <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-off" />
+            <input
+              value={qInput}
+              onChange={(e) => setQInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && setFilter('q', qInput.trim())}
+              placeholder="Search headlines…"
+              className="h-11 w-full border border-line-strong bg-paper pr-3 pl-10 outline-none focus:border-navy focus:ring-2 focus:ring-navy/20"
+            />
+          </div>
+          <Select label="Status" value={status} onChange={(e) => setFilter('status', e.target.value)} className="sm:w-40">
+            <option value="">All</option>
+            {['draft', 'review', 'scheduled', 'published', 'hidden'].map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </Select>
+          <Select label="Category" value={section} onChange={(e) => setFilter('section', e.target.value)} className="sm:w-44">
+            <option value="">All</option>
+            {(sections.data ?? []).map((s) => (
+              <option key={s.slug} value={s.slug}>{s.label}</option>
+            ))}
+          </Select>
+          <Button variant="outline" onClick={() => setFilter('q', qInput.trim())}>Search</Button>
         </div>
-      </div>
+      </Card>
 
-      <div className="mb-5 grid gap-3 sm:grid-cols-[minmax(0,1fr)_180px_180px]">
-        <div className="relative">
-          <Search className="pointer-events-none absolute top-1/2 left-3.5 h-[18px] w-[18px] -translate-y-1/2 text-muted" aria-hidden="true" />
-          <input
-            type="search"
-            aria-label="Search headlines"
-            placeholder="Search headlines"
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setParam('q', e.target.value.trim());
-            }}
-            className={cx(inputClass, 'pl-10')}
-          />
-        </div>
-        <select aria-label="Filter by section" value={section} onChange={(e) => setParam('section', e.target.value)} className={cx(inputClass, 'cursor-pointer')}>
-          <option value="">All categories</option>
-          {(sections.data ?? []).map((s) => (
-            <option key={s.slug} value={s.slug}>
-              {s.label}
-            </option>
-          ))}
-        </select>
-        <select aria-label="Filter by author" value={author} onChange={(e) => setParam('author', e.target.value)} className={cx(inputClass, 'cursor-pointer')}>
-          <option value="">All authors</option>
-          {(authors.data ?? []).map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.name}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {list.error && !list.data ? (
-        <ErrorState message={list.error} onRetry={() => list.reload()} />
-      ) : list.loading && !list.data ? (
-        <SkeletonRows rows={6} />
-      ) : items.length === 0 ? (
-        filtered ? (
-          <EmptyState
-            icon={<Search className="h-8 w-8" aria-hidden="true" />}
-            title="No stories match"
-            action={
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setSearch('');
-                  setParams(new URLSearchParams(), { replace: true });
-                }}
-              >
-                Clear the filters
-              </Button>
-            }
-          >
-            Try a different word, or widen the status, category or author.
-          </EmptyState>
+      <Card>
+        {list.loading && !list.data ? (
+          <Spinner label="Loading stories" />
+        ) : list.error ? (
+          <ErrorBox message={list.error} onRetry={() => list.reload()} />
+        ) : items.length === 0 ? (
+          <Empty icon={<PenLine className="h-8 w-8" />} title="No stories match these filters.">
+            Clear the status, category or author, or write a new story.
+          </Empty>
         ) : (
-          <EmptyState
-            icon={<FileText className="h-8 w-8" aria-hidden="true" />}
-            title="No stories yet"
-            action={
-              <Link to="/articles/new" className={buttonClass('primary')}>
-                <Plus className="h-[18px] w-[18px]" aria-hidden="true" />
-                Write the first one
-              </Link>
-            }
-          >
-            Stories are saved here for the whole team as soon as you write them.
-          </EmptyState>
-        )
-      ) : (
-        <>
-          {list.error && <p className="mb-3 text-sm font-bold text-brand">Could not refresh the list. {list.error}</p>}
-          <ul className={cx('divide-y divide-line border border-line bg-paper transition-opacity', list.loading && 'opacity-60')}>
-            {items.map((a) => {
-              const sec = a.section ? sectionMap.get(a.section) : undefined;
-              return (
-                <li key={a.id} className="flex gap-3.5 p-4 sm:gap-4">
-                  {a.image_url ? (
-                    <img src={a.image_url} alt="" loading="lazy" className="h-[60px] w-20 shrink-0 bg-wash object-cover sm:h-[76px] sm:w-28" />
-                  ) : (
-                    <div aria-hidden="true" className="flex h-[60px] w-20 shrink-0 items-center justify-center bg-wash text-line-strong sm:h-[76px] sm:w-28">
-                      <FileText className="h-6 w-6" />
-                    </div>
-                  )}
-                  <div className="flex min-w-0 flex-1 flex-col gap-3 md:flex-row md:items-start md:justify-between md:gap-5">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <StatusBadge status={a.status} />
-                        {a.placement === 'main' && <Pill className="bg-brand text-white">Main headline</Pill>}
-                        {a.placement === 'headline' && <Pill className="bg-ink text-white">Headline news</Pill>}
-                        <MediaBadges kinds={a.media_kinds} />
-                        {sec && !sec.enabled && <Pill className="bg-warn-tint text-warn-deep">Category switched off</Pill>}
-                      </div>
-                      <Link to={`/articles/${a.id}`} className="mt-1.5 block text-[17px] leading-snug font-extrabold text-ink hover:text-brand">
-                        {a.headline}
-                      </Link>
-                      <p className="mt-1 text-sm leading-snug text-muted">
-                        <span className="font-bold text-body">{sec?.label ?? 'No category'}</span> · {a.author_name} · {dateLine(a)}
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 flex-wrap items-center gap-2">
-                      <Link to={`/articles/${a.id}`} className={buttonClass('outline', 'sm')}>
-                        <Pencil className="h-4 w-4" aria-hidden="true" />
-                        {canChange(a) ? 'Edit' : 'Open'}
-                      </Link>
-                      {editor && (a.status === 'review' || a.status === 'hidden') && (
-                        <Button variant="navy" size="sm" loading={busyId === a.id} onClick={() => setStatus(a, 'published')}>
-                          Publish
-                        </Button>
-                      )}
-                      {editor && a.status === 'published' && (
-                        <Button variant="outline" size="sm" loading={busyId === a.id} onClick={() => setStatus(a, 'hidden')}>
-                          Hide
-                        </Button>
-                      )}
-                      {canDelete(a) && (
-                        <IconButton label={`Delete “${a.headline}”`} tone="danger" onClick={() => setToDelete(a)}>
-                          <Trash2 className="h-4 w-4" aria-hidden="true" />
-                        </IconButton>
-                      )}
-                    </div>
+          <ul className="divide-y divide-line">
+            {items.map((a) => (
+              <li key={a.id} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-start">
+                {a.image_url && (
+                  <img src={a.image_url} alt="" className="h-20 w-28 shrink-0 object-cover" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="mb-1 flex flex-wrap items-center gap-2">
+                    <Badge tone={a.status}>{a.status}</Badge>
+                    {a.placement === 'main' && <Badge tone="brand">Main</Badge>}
+                    {a.placement === 'headline' && <Badge tone="navy">Headline</Badge>}
+                    {a.section && (
+                      <span className="text-xs font-bold uppercase tracking-wide text-muted">
+                        {secMap.get(a.section)?.label || a.section}
+                      </span>
+                    )}
                   </div>
-                </li>
-              );
-            })}
+                  <Link to={`/articles/${a.id}`} className="text-[16px] leading-snug font-bold text-ink hover:text-brand">
+                    {a.headline}
+                  </Link>
+                  <p className="mt-1 text-sm text-muted">
+                    By {a.author_name} · updated {fmtDate(a.updated_at)}
+                    {a.status === 'published' && a.publish_at ? ` · published ${fmtDate(a.publish_at)}` : ''}
+                  </p>
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  <Link to={`/articles/${a.id}`}>
+                    <Button size="sm" variant="outline">Edit</Button>
+                  </Link>
+                  {a.status !== 'published' && (member?.role !== 'writer' || a.status === 'draft') && (
+                    <Button size="sm" variant="navy" loading={busy === a.id} onClick={() => setStatus(a, 'published')}>
+                      Publish
+                    </Button>
+                  )}
+                  {a.status === 'published' && (
+                    <Button size="sm" variant="outline" loading={busy === a.id} onClick={() => setStatus(a, 'hidden')}>
+                      Hide
+                    </Button>
+                  )}
+                  <Button size="sm" variant="danger" icon={<Trash2 className="h-3.5 w-3.5" />} onClick={() => setDelId(a.id)}>
+                    Delete
+                  </Button>
+                </div>
+              </li>
+            ))}
           </ul>
-          <p className="mt-3 text-sm text-muted">
-            Showing {items.length} {items.length === 1 ? 'story' : 'stories'}
-            {items.length === 300 ? ', the most recently edited. Use the filters to narrow it down.' : '.'}
-          </p>
-        </>
+        )}
+      </Card>
+
+      {delId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy-deep/70 p-4">
+          <div className="w-full max-w-md border border-line bg-paper p-6 shadow-xl">
+            <h3 className="text-lg font-extrabold text-ink">Delete this story?</h3>
+            <p className="mt-2 text-sm text-muted">This cannot be undone. Comments on the story are removed too.</p>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setDelId(null)}>Cancel</Button>
+              <Button variant="danger" loading={busy === delId} onClick={remove}>Delete</Button>
+            </div>
+          </div>
+        </div>
       )}
 
-      <ConfirmDialog
-        open={Boolean(toDelete)}
-        title="Delete this story for good?"
-        confirmLabel="Delete for good"
-        busy={deleting}
-        onConfirm={confirmDelete}
-        onClose={() => !deleting && setToDelete(null)}
-      >
-        <p>
-          <span className="font-bold text-ink">{toDelete?.headline}</span> will be removed from the newsroom and from the site. This cannot be undone.
-        </p>
-        {toDelete?.status === 'published' && <p className="mt-2">To take it off the site but keep the copy, close this and choose Hide instead.</p>}
-      </ConfirmDialog>
+      {toast && <Toast message={toast.msg} tone={toast.tone} />}
     </>
   );
 }

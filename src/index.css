@@ -2,7 +2,6 @@
 
 @theme {
   --font-sans: "Figtree", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-
   --color-brand: #890303;
   --color-brand-strong: #6a0202;
   --color-brand-bright: #ff6b6b;
@@ -11,48 +10,37 @@
   --color-navy-deep: #02034f;
   --color-navy-tint: #eef0fb;
   --color-ink: #14161b;
-  --color-body: #2d3139;
+  --color-body: #2a2e36;
   --color-muted: #5a616d;
   --color-line: #dfe2e8;
   --color-line-strong: #c3c8d2;
   --color-off: #868d9a;
   --color-wash: #f3f4f7;
   --color-paper: #ffffff;
-  --color-live: #35d07f;
-  --color-live-deep: #0e7440;
-  --color-live-tint: #e4f7ec;
-  --color-warn: #f5b942;
-  --color-warn-deep: #7a4e00;
-  --color-warn-tint: #fdf3d9;
 }
 
-@layer base {
-  html {
-    -webkit-text-size-adjust: 100%;
-  }
-
-  body {
-    background: var(--color-wash);
-    color: var(--color-body);
-    font-family: var(--font-sans);
-    -webkit-font-smoothing: antialiased;
-    text-rendering: optimizeLegibility;
-  }
-
-  :focus-visible {
-    outline: 2px solid var(--color-navy);
-    outline-offset: 2px;
-  }
-
-  ::selection {
-    background: var(--color-navy);
-    color: #fff;
-  }
+html,
+body,
+#root {
+  min-height: 100%;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .animate-spin,
-  .animate-pulse {
-    animation-duration: 2.5s;
-  }
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  color: var(--color-body);
+  background: var(--color-wash);
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+@keyframes marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
 }

@@ -1,15 +1,16 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
-import type { Session } from '@supabase/supabase-js';
-import { getSupabase } from '../lib/supabase';
-import { api, ApiError, errorMessage } from '../lib/api';
-import type { Member } from '../lib/types';
+import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
+import supabase from '../lib/supabase';
+import { api, ApiError } from '../lib/api';
+import type { TeamMember } from '../lib/types';
+import type { User, Session } from '@supabase/supabase-js';
 
-type Status = 'loading' | 'signedOut' | 'noAccess' | 'ready' | 'error';
+type Status = 'loading' | 'ready' | 'signedOut' | 'noAccess' | 'error';
 
-interface AuthValue {
+interface AuthCtx {
+  user: User | null;
+  session: Session | null;
+  member: TeamMember | null;
   status: Status;
-  member: Member | null;
-  email: string | null;
   error: string | null;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -17,115 +18,104 @@ interface AuthValue {
   retry: () => void;
 }
 
-const AuthContext = createContext<AuthValue | null>(null);
+const AuthContext = createContext<AuthCtx>({
+  user: null,
+  session: null,
+  member: null,
+  status: 'loading',
+  error: null,
+  signIn: async () => {},
+  signOut: async () => {},
+  refreshMember: async () => {},
+  retry: () => {},
+});
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
-  const [booted, setBooted] = useState(false);
+  const [member, setMember] = useState<TeamMember | null>(null);
   const [status, setStatus] = useState<Status>('loading');
-  const [member, setMember] = useState<Member | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [attempt, setAttempt] = useState(0);
+  const [tick, setTick] = useState(0);
 
-  useEffect(() => {
-    let cancelled = false;
-    let unsubscribe = () => {};
-    getSupabase()
-      .then((supabase) => {
-        if (cancelled) return;
-        supabase.auth.getSession().then(({ data }) => {
-          if (cancelled) return;
-          setSession(data.session);
-          setBooted(true);
-        });
-        const { data } = supabase.auth.onAuthStateChange((_event, next) => {
-          setSession(next);
-          setBooted(true);
-        });
-        unsubscribe = () => data.subscription.unsubscribe();
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setError(errorMessage(err));
-        setStatus('error');
-      });
-    return () => {
-      cancelled = true;
-      unsubscribe();
-    };
-  }, [attempt]);
-
-  const userId = session?.user?.id ?? null;
-
-  const loadMember = useCallback(async () => {
-    try {
-      const me = await api<Member>('/api/team?me=1');
-      setMember(me);
-      setError(null);
-      setStatus('ready');
-    } catch (err) {
+  const loadMember = useCallback(async (sess: Session | null) => {
+    if (!sess) {
       setMember(null);
-      if (err instanceof ApiError && err.status === 403) setStatus('noAccess');
-      else if (err instanceof ApiError && err.status === 401) setStatus('signedOut');
+      setStatus('signedOut');
+      return;
+    }
+    try {
+      const m = await api<TeamMember>('/api/team?me=1');
+      setMember(m);
+      setStatus('ready');
+      setError(null);
+    } catch (e) {
+      setMember(null);
+      if (e instanceof ApiError && e.status === 403) setStatus('noAccess');
+      else if (e instanceof ApiError && e.status === 401) setStatus('signedOut');
       else {
-        setError(errorMessage(err));
+        setError(e instanceof Error ? e.message : 'Could not load your desk profile.');
         setStatus('error');
       }
     }
   }, []);
 
   useEffect(() => {
-    if (!booted) return;
-    if (!userId) {
-      setMember(null);
-      setStatus('signedOut');
-      return;
-    }
-    setStatus('loading');
-    loadMember();
-  }, [booted, userId, loadMember, attempt]);
+    let alive = true;
+    supabase.auth.getSession().then(({ data: { session: s } }) => {
+      if (!alive) return;
+      setSession(s);
+      setUser(s?.user ?? null);
+      loadMember(s);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => {
+      setSession(s);
+      setUser(s?.user ?? null);
+      loadMember(s);
+    });
+    return () => {
+      alive = false;
+      subscription.unsubscribe();
+    };
+  }, [loadMember, tick]);
 
-  const signIn = useCallback(async (email: string, password: string) => {
-    const supabase = await getSupabase();
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
-    if (signInError) {
-      throw new Error(
-        /invalid/i.test(signInError.message)
-          ? 'That email and password do not match. Check them and try again.'
-          : signInError.message,
-      );
+  const signIn = async (email: string, password: string) => {
+    const { error: err } = await supabase.auth.signInWithPassword({ email, password });
+    if (err) {
+      const msg = /invalid/i.test(err.message)
+        ? 'That email and password do not match. Check them and try again.'
+        : err.message;
+      throw new Error(msg);
     }
-  }, []);
+  };
 
-  const signOut = useCallback(async () => {
-    const supabase = await getSupabase();
+  const signOut = async () => {
     await supabase.auth.signOut();
-  }, []);
+    setMember(null);
+    setStatus('signedOut');
+  };
 
-  const retry = useCallback(() => {
-    setStatus('loading');
-    setError(null);
-    setAttempt((n) => n + 1);
-  }, []);
+  const refreshMember = async () => {
+    await loadMember(session);
+  };
 
   return (
     <AuthContext.Provider
-      value={{ status, member, email: session?.user?.email ?? null, error, signIn, signOut, refreshMember: loadMember, retry }}
+      value={{
+        user,
+        session,
+        member,
+        status,
+        error,
+        signIn,
+        signOut,
+        refreshMember,
+        retry: () => setTick((t) => t + 1),
+      }}
     >
       {children}
     </AuthContext.Provider>
   );
 }
 
-export function useAuth(): AuthValue {
-  const value = useContext(AuthContext);
-  if (!value) throw new Error('useAuth must be used inside AuthProvider');
-  return value;
-}
-
-/** For screens inside the signed-in shell, where a member is guaranteed. */
-export function useMember(): Member {
-  const { member } = useAuth();
-  if (!member) throw new Error('useMember used outside the signed-in area');
-  return member;
-}
+export const useAuth = () => useContext(AuthContext);
