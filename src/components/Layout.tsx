@@ -22,10 +22,15 @@ import {
   Bell,
   Mail,
   PenLine,
-  Contact,
   RefreshCw,
   PanelRightOpen,
   PanelRightClose,
+  StickyNote,
+  UserCheck,
+  CalendarDays,
+  AlarmClock,
+  Mic,
+  Workflow,
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
@@ -36,52 +41,46 @@ import Logo from './Logo';
 
 const nav = [
   {
-    group: 'Start here',
+    group: 'Newsroom',
     items: [
       { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
-      { to: '/articles/new', label: 'Write a story', icon: PenLine },
-      { to: '/articles', label: 'All articles', icon: FileText },
-    ],
-  },
-  {
-    group: 'Publish',
-    items: [
-      { to: '/scheduled', label: 'Scheduled', icon: CalendarClock },
-      { to: '/breaking', label: 'Breaking & front page', icon: Zap },
-      { to: '/media', label: 'Media · YouTube & clips', icon: ImageIcon },
-    ],
-  },
-  {
-    group: 'Moderate',
-    items: [
+      { to: '/articles', label: 'Articles', icon: FileText },
+      { to: '/scheduled', label: 'Scheduled posts', icon: CalendarClock },
+      { to: '/breaking', label: 'Breaking news', icon: Zap },
       { to: '/comments', label: 'Comments', icon: MessageSquare },
+      { to: '/media', label: 'Media library', icon: ImageIcon },
+      { to: '/interviews', label: 'Interview Recorder', icon: Mic },
       { to: '/notifications', label: 'Notifications', icon: Bell },
-      { to: '/mail', label: 'Staff mail', icon: Mail },
+      { to: '/mail', label: 'Mail', icon: Mail },
+      { to: '/notes', label: 'Notes', icon: StickyNote },
+      { to: '/reminders', label: 'Reminders', icon: AlarmClock },
+      { to: '/assignments', label: 'Assignments', icon: UserCheck },
+      { to: '/calendar', label: 'Calendar', icon: CalendarDays },
+      { to: '/automations', label: 'Automations', icon: Workflow, roles: ['owner', 'editor'] as const },
     ],
   },
   {
-    group: 'Library',
+    group: 'Organise',
     items: [
       { to: '/categories', label: 'Categories', icon: FolderOpen, roles: ['owner', 'editor'] as const },
       { to: '/tags', label: 'Tags', icon: Tags, roles: ['owner', 'editor'] as const },
-      { to: '/authors', label: 'Author profiles', icon: Users, roles: ['owner', 'editor'] as const },
+      { to: '/authors', label: 'Authors', icon: Users, roles: ['owner', 'editor'] as const },
     ],
   },
   {
-    group: 'News app control',
+    group: 'Site',
     items: [
-      { to: '/homepage', label: 'Homepage layout', icon: Home, roles: ['owner', 'editor'] as const },
-      { to: '/ads', label: 'Ads & banner sizes', icon: Megaphone, roles: ['owner', 'editor'] as const },
+      { to: '/homepage', label: 'Homepage sections', icon: Home, roles: ['owner', 'editor'] as const },
+      { to: '/ads', label: 'Ads control', icon: Megaphone, roles: ['owner', 'editor'] as const },
       { to: '/analytics', label: 'Analytics', icon: BarChart3 },
-      { to: '/settings', label: 'Site settings', icon: Settings, roles: ['owner', 'editor'] as const },
-      { to: '/site/staff', label: 'Staff directory', icon: Contact },
+      { to: '/settings', label: 'Settings', icon: Settings, roles: ['owner', 'editor'] as const },
     ],
   },
   {
     group: 'People',
     items: [
       { to: '/users', label: 'Users and roles', icon: UserCog, roles: ['owner'] as const },
-      { to: '/account', label: 'Your account & email', icon: User },
+      { to: '/account', label: 'Your account', icon: User },
     ],
   },
 ];
@@ -130,8 +129,10 @@ export default function Layout() {
   const [pending, setPending] = useState(0);
   const [unread, setUnread] = useState(0);
   const [mailUnread, setMailUnread] = useState(0);
-  const [previewOn, setPreviewOn] = useState(true);
+  const [previewOn, setPreviewOn] = useState(false);
   const [previewKey, setPreviewKey] = useState(0);
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+  const [justSynced, setJustSynced] = useState(false);
 
   const refreshPreview = useCallback(() => setPreviewKey((k) => k + 1), []);
 
@@ -143,6 +144,30 @@ export default function Layout() {
       return () => window.clearTimeout(t);
     }
   }, [location.pathname, location.search, refreshPreview]);
+
+  // Sync with the news app the instant any save touches content it reads —
+  // articles, sections, tags, ads, media, comments, authors or settings —
+  // regardless of which desk page you're on, not just on navigation.
+  useEffect(() => {
+    let debounce: number | null = null;
+    let flashTimer: number | null = null;
+    const onSiteChanged = () => {
+      if (debounce) window.clearTimeout(debounce);
+      debounce = window.setTimeout(() => {
+        refreshPreview();
+        setLastSyncedAt(new Date());
+        setJustSynced(true);
+        if (flashTimer) window.clearTimeout(flashTimer);
+        flashTimer = window.setTimeout(() => setJustSynced(false), 2200);
+      }, 350);
+    };
+    window.addEventListener('site-changed', onSiteChanged);
+    return () => {
+      window.removeEventListener('site-changed', onSiteChanged);
+      if (debounce) window.clearTimeout(debounce);
+      if (flashTimer) window.clearTimeout(flashTimer);
+    };
+  }, [refreshPreview]);
 
   useEffect(() => {
     let alive = true;
@@ -185,23 +210,21 @@ export default function Layout() {
   };
 
   const Sidebar = (
-    <aside className="flex h-full w-[280px] flex-col border-r border-line bg-paper">
-      <div className="flex h-16 shrink-0 items-center border-b border-line px-4">
+    <aside className="glass flex h-full w-[280px] flex-col rounded-none border-r border-line/60">
+      <div className="flex h-16 shrink-0 items-center border-b border-line/60 px-4">
         <Link to="/" className="inline-block" onClick={() => setOpen(false)} aria-label="180news Newsroom CMS, dashboard">
           <Logo />
         </Link>
       </div>
 
-      <div className="border-b border-line bg-navy-tint/50 px-4 py-3">
-        <p className="truncate text-[15px] font-extrabold text-ink">{member?.name}</p>
-        <p className="truncate text-sm capitalize text-muted">{role} · {member?.email}</p>
-        <Link
-          to="/articles/new"
-          onClick={() => setOpen(false)}
-          className="mt-3 flex h-10 w-full items-center justify-center gap-2 bg-brand text-sm font-bold text-white hover:bg-brand-strong"
-        >
-          <PenLine className="h-4 w-4" /> New story
-        </Link>
+      <div className="mx-2.5 mt-2.5 flex items-center gap-2.5 rounded-xl border border-white/40 bg-navy-tint/50 px-3 py-2.5 backdrop-blur-sm">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-navy text-[13px] font-extrabold text-white">
+          {(member?.name || '?').trim().split(/\s+/).slice(0, 2).map((p) => p[0]).join('').toUpperCase()}
+        </span>
+        <div className="min-w-0">
+          <p className="truncate text-[14px] font-extrabold text-ink">{member?.name}</p>
+          <p className="truncate text-xs capitalize text-muted">{role} · {member?.email}</p>
+        </div>
       </div>
 
       <nav className="flex-1 overflow-y-auto px-2.5 py-3" aria-label="Main">
@@ -224,10 +247,10 @@ export default function Layout() {
                         onClick={() => setOpen(false)}
                         className={({ isActive }) =>
                           cn(
-                            'flex items-center gap-2.5 px-2.5 py-2 text-[14.5px] font-semibold transition-colors',
+                            'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[14.5px] font-semibold transition-colors',
                             isActive
-                              ? 'border-l-[3px] border-brand bg-navy-tint text-navy pl-[7px]'
-                              : 'border-l-[3px] border-transparent text-body hover:bg-wash hover:text-ink'
+                              ? 'bg-brand text-white shadow-sm'
+                              : 'text-body hover:bg-wash hover:text-ink'
                           )
                         }
                       >
@@ -244,18 +267,18 @@ export default function Layout() {
         })}
       </nav>
 
-      <div className="space-y-0.5 border-t border-line p-2.5">
+      <div className="space-y-0.5 border-t border-line/60 p-2.5">
         <Link
           to="/site"
           onClick={() => setOpen(false)}
-          className="flex items-center gap-2 px-2.5 py-2 text-[14.5px] font-semibold text-navy hover:bg-navy-tint"
+          className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-[14.5px] font-semibold text-navy hover:bg-navy-tint"
         >
           <ExternalLink className="h-[17px] w-[17px]" /> Open news app
         </Link>
         <button
           type="button"
           onClick={() => signOut()}
-          className="flex w-full cursor-pointer items-center gap-2 px-2.5 py-2 text-[14.5px] font-semibold text-body hover:bg-wash hover:text-ink"
+          className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-[14.5px] font-semibold text-body hover:bg-wash hover:text-ink"
         >
           <LogOut className="h-[17px] w-[17px]" /> Sign out
         </button>
@@ -264,11 +287,11 @@ export default function Layout() {
   );
 
   return (
-    <div className="flex h-dvh min-h-0 overflow-hidden bg-wash">
+    <div className="flex h-dvh min-h-0 overflow-hidden">
       {/* CMS column — half screen when preview is on */}
       <div
         className={cn(
-          'flex min-h-0 min-w-0 flex-col border-r border-line bg-wash',
+          'flex min-h-0 min-w-0 flex-col border-r border-line/60',
           previewOn ? 'w-full lg:w-1/2' : 'w-full'
         )}
       >
@@ -283,7 +306,7 @@ export default function Layout() {
 
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             {/* Mobile header */}
-            <header className="sticky top-0 z-20 flex h-12 shrink-0 items-center gap-3 border-b border-line bg-paper/95 px-3 backdrop-blur lg:hidden">
+            <header className="glass sticky top-0 z-20 flex h-12 shrink-0 items-center gap-3 rounded-none border-x-0 border-t-0 px-3 lg:hidden">
               <button type="button" className="cursor-pointer p-2 text-ink" onClick={() => setOpen(true)} aria-label="Open menu">
                 {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
               </button>
@@ -292,17 +315,17 @@ export default function Layout() {
                 {alertTotal > 0 && (
                   <span className="rounded-full bg-brand px-2 py-0.5 text-[11px] font-bold text-white">{alertTotal}</span>
                 )}
-                <Link to="/articles/new" className="inline-flex h-9 items-center bg-brand px-3 text-sm font-bold text-white">
+                <Link to="/articles/new" className="inline-flex h-9 items-center rounded-lg bg-brand px-3 text-sm font-bold text-white shadow-sm">
                   Write
                 </Link>
               </div>
             </header>
 
             {/* Desktop top bar */}
-            <header className="sticky top-0 z-20 hidden h-12 shrink-0 border-b border-line bg-paper/95 backdrop-blur lg:block">
-              <div className="flex h-12 items-center gap-2 px-4">
+            <header className="glass sticky top-0 z-20 hidden h-14 shrink-0 rounded-none border-x-0 border-t-0 lg:block">
+              <div className="flex h-14 items-center gap-2 px-5">
                 <p className="mr-auto truncate text-sm text-muted">
-                  <span className="font-bold text-ink">CMS</span>
+                  <span className="font-bold text-ink">180news CMS</span>
                   <span className="mx-2 text-line-strong">·</span>
                   Edit while the live app updates beside you
                 </p>
@@ -333,7 +356,7 @@ export default function Layout() {
             </header>
 
             <main className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-5 lg:px-6">
-              <div className="mx-auto w-full max-w-4xl">
+              <div className={cn('mx-auto w-full', location.pathname === '/mail' ? 'max-w-[1600px]' : 'max-w-4xl')}>
                 <Outlet />
               </div>
             </main>
@@ -343,12 +366,18 @@ export default function Layout() {
 
       {/* Live news app — other half, desktop viewport (not mobile) */}
       {previewOn && (
-        <section className="hidden min-h-0 w-1/2 flex-col border-l border-line bg-paper lg:flex">
-          <div className="flex h-12 shrink-0 items-center gap-3 border-b border-line bg-navy-deep px-4 text-white">
-            <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" aria-hidden />
+        <section className="hidden min-h-0 w-1/2 flex-col border-l border-line/60 bg-paper lg:flex">
+          <div className="glass-dark flex h-12 shrink-0 items-center gap-3 rounded-none border-x-0 border-t-0 px-4 text-white">
+            <span className={cn('h-2 w-2 shrink-0 rounded-full bg-emerald-400', justSynced && 'animate-ping')} aria-hidden />
             <p className="min-w-0 flex-1 truncate text-sm font-bold">
               Live news app
-              <span className="ml-2 font-medium text-white/65">Desktop preview · updates as you edit</span>
+              <span className="ml-2 font-medium text-white/65">
+                {justSynced
+                  ? 'Synced just now'
+                  : lastSyncedAt
+                    ? `Synced ${lastSyncedAt.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', hour12: false })}`
+                    : 'Desktop preview · updates as you edit'}
+              </span>
             </p>
             <button
               type="button"

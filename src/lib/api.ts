@@ -1,4 +1,5 @@
 import supabase from './supabase';
+import { mockRequest } from './mockApi';
 
 export class ApiError extends Error {
   status: number;
@@ -13,36 +14,62 @@ export class ApiError extends Error {
   }
 }
 
+// Routes whose data the public news app (/site) reads. Any successful
+// mutation against one of these fires a `site-changed` window event so the
+// CMS's live preview — and any other open tab showing /site — can sync
+// immediately, instead of waiting for a route change or manual refresh.
+const SITE_SYNCED_PATHS = new Set([
+  '/api/articles',
+  '/api/sections',
+  '/api/tags',
+  '/api/settings',
+  '/api/ads',
+  '/api/media',
+  '/api/comments',
+]);
+
+function notifySiteChangedIfNeeded(path: string, method: string) {
+  if (method === 'GET') return;
+  let pathname = path;
+  let search = '';
+  try {
+    const url = new URL(path, 'https://local.invalid');
+    pathname = url.pathname;
+    search = url.search;
+  } catch {
+    /* relative path without a parseable query — use as-is */
+  }
+  const isAuthorsUpdate = pathname === '/api/team' && /resource=authors/.test(search);
+  if (SITE_SYNCED_PATHS.has(pathname) || isAuthorsUpdate) {
+    window.dispatchEvent(new Event('site-changed'));
+  }
+}
+
+// Every /api/* call in this app is served from mockApi.ts — a browser-side
+// stand-in for the Vercel functions in /api that mirrors their routes and
+// rules against the localStorage-backed store in localStore.ts. See
+// src/lib/localStore.ts for the seed data and src/lib/mockApi.ts for the
+// route handlers.
 export async function api<T = unknown>(path: string, opts: { method?: string; body?: unknown } = {}): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  if (token) headers.Authorization = `Bearer ${token}`;
+  const token = data.session?.access_token ?? null;
+  const method = opts.method ?? 'GET';
 
-  let res: Response;
+  await new Promise((resolve) => setTimeout(resolve, 90));
+
+  let result: { status: number; body: unknown };
   try {
-    res = await fetch(path, {
-      method: opts.method ?? 'GET',
-      headers,
-      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-    });
-  } catch {
-    throw new ApiError('Could not reach the newsroom server. Check your connection and try again.', 0);
+    result = await mockRequest(method, path, opts.body, token);
+  } catch (e) {
+    throw new ApiError(e instanceof Error ? e.message : 'Something went wrong.', 500);
   }
 
-  const text = await res.text();
-  let json: any = null;
-  try {
-    json = text ? JSON.parse(text) : null;
-  } catch {
-    json = null;
+  if (result.status < 200 || result.status >= 300) {
+    const g = (result.body ?? {}) as { error?: string; code?: string; fields?: Record<string, string> };
+    throw new ApiError(g.error || 'Request failed', result.status, g.code ?? null, g.fields ?? null);
   }
-
-  if (!res.ok) {
-    const g = json ?? {};
-    throw new ApiError(g.error || res.statusText || 'Request failed', res.status, g.code ?? null, g.fields ?? null);
-  }
-  return json as T;
+  notifySiteChangedIfNeeded(path, method);
+  return result.body as T;
 }
 
 export function errMsg(e: unknown): string {
@@ -50,3 +77,5 @@ export function errMsg(e: unknown): string {
   if (e instanceof Error) return e.message;
   return 'Something went wrong.';
 }
+
+export const errorMessage = errMsg;

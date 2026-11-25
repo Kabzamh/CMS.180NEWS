@@ -21,11 +21,16 @@ import Users from './pages/Users';
 import Account from './pages/Account';
 import Notifications from './pages/Notifications';
 import Mail from './pages/Mail';
+import Notes from './pages/Notes';
+import Reminders from './pages/Reminders';
+import Interviews from './pages/Interviews';
+import Automations from './pages/Automations';
+import Assignments from './pages/Assignments';
+import Calendar from './pages/Calendar';
 import SiteLayout from './pages/site/SiteLayout';
 import SiteHome from './pages/site/SiteHome';
 import SiteStory from './pages/site/SiteStory';
 import SiteSection from './pages/site/SiteSection';
-import SiteStaff from './pages/site/SiteStaff';
 
 export default function App() {
   return (
@@ -37,7 +42,6 @@ export default function App() {
             <Route index element={<SiteHome />} />
             <Route path="story/:id" element={<SiteStory />} />
             <Route path="section/:slug" element={<SiteSection />} />
-            <Route path="staff" element={<SiteStaff />} />
           </Route>
           <Route
             element={
@@ -55,6 +59,12 @@ export default function App() {
             <Route path="comments" element={<Comments />} />
             <Route path="notifications" element={<Notifications />} />
             <Route path="mail" element={<Mail />} />
+            <Route path="notes" element={<Notes />} />
+            <Route path="reminders" element={<Reminders />} />
+            <Route path="interviews" element={<Interviews />} />
+            <Route path="automations" element={<Automations />} />
+            <Route path="assignments" element={<Assignments />} />
+            <Route path="calendar" element={<Calendar />} />
             <Route path="media" element={<Media />} />
             <Route path="categories" element={<Sections />} />
             <Route path="tags" element={<Tags />} />

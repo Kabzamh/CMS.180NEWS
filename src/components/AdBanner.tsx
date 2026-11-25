@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { AdSlot } from '../lib/types';
+import { api } from '../lib/api';
 
 type AdLike = Pick<
   AdSlot,
@@ -7,24 +8,15 @@ type AdLike = Pick<
 >;
 
 function trackEvent(kind: string, ad: AdLike) {
-  try {
-    const payload = JSON.stringify({
+  api('/api/track', {
+    method: 'POST',
+    body: {
       kind,
       ad_id: ad.id,
       slot: ad.slot,
       page_path: typeof window !== 'undefined' ? window.location.pathname + window.location.search : '',
-    });
-    if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
-      navigator.sendBeacon('/api/track', new Blob([payload], { type: 'application/json' }));
-      return;
-    }
-    fetch('/api/track', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: payload,
-      keepalive: true,
-    }).catch(() => {});
-  } catch (_) {}
+    },
+  }).catch(() => {});
 }
 
 function trackAdClick(ad: AdLike) {
@@ -126,21 +118,12 @@ export function pickAds(ads: AdLike[] | undefined, adsEnabled = true): AdLike[] 
 
 /** Record a page visit on the public news app */
 export function trackPageVisit(path?: string) {
-  try {
-    const payload = JSON.stringify({
+  api('/api/track', {
+    method: 'POST',
+    body: {
       kind: 'page',
       path: path || (typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/'),
       referrer: typeof document !== 'undefined' ? document.referrer || '' : '',
-    });
-    if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
-      navigator.sendBeacon('/api/track', new Blob([payload], { type: 'application/json' }));
-      return;
-    }
-    fetch('/api/track', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: payload,
-      keepalive: true,
-    }).catch(() => {});
-  } catch (_) {}
+    },
+  }).catch(() => {});
 }

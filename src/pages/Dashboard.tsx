@@ -1,14 +1,21 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  FileText, PenLine, CheckCircle2, Eye, Clock, Youtube, Megaphone, BarChart3,
-  Mail, LayoutTemplate, Users, Image as ImageIcon, RefreshCw,
+  FileText, PenLine, CheckCircle2, Eye, Clock, RefreshCw,
 } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { api, errMsg } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { PageHeader, Card, CardHead, Spinner, ErrorBox, Badge, Button, fmtDate, fmtNum, Toast } from '../components/ui';
+import { TrendChart } from '../components/TrendChart';
+import { ActivityTimeline } from '../components/ActivityTimeline';
 import type { Article } from '../lib/types';
+
+interface DashAnalytics {
+  days: number;
+  daily: Array<{ date: string; reads: number; visits: number; adClicks: number }>;
+  timeline: Array<{ kind: string; title: string; body: string; link: string; created_at: string }>;
+}
 
 interface DashData {
   counts: Record<string, number>;
@@ -49,6 +56,10 @@ export default function Dashboard() {
   const editor = member?.role === 'owner' || member?.role === 'editor';
   const { data, loading, error, reload } = useApi<DashData>(
     () => api(`/api/dashboard?tz=${new Date().getTimezoneOffset()}`),
+    []
+  );
+  const trends = useApi<DashAnalytics>(
+    () => api(`/api/dashboard?report=analytics&days=7&tz=${new Date().getTimezoneOffset()}`),
     []
   );
   const [toast, setToast] = useState<string | null>(null);
@@ -162,47 +173,16 @@ export default function Dashboard() {
         }
       />
 
-      <Card className="mb-6 border-t-4 border-t-navy">
-        <div className="border-b border-line px-5 py-3">
-          <h2 className="text-sm font-black tracking-[0.06em] text-navy uppercase">Quick actions</h2>
-          <p className="text-sm text-muted">Everything you need, arranged by task</p>
-        </div>
-        <ul className="grid gap-px bg-line sm:grid-cols-2 lg:grid-cols-4">
-          {[
-            { to: '/articles/new', icon: PenLine, title: 'Publish a story', text: 'Draft, YouTube, video & audio' },
-            { to: '/homepage', icon: LayoutTemplate, title: 'Homepage layout', text: 'Order category blocks' },
-            { to: '/ads', icon: Megaphone, title: 'Ads & sizes', text: 'Banners, IAB sizes, slots' },
-            { to: '/analytics', icon: BarChart3, title: 'Analytics', text: 'Reads and top stories' },
-            { to: '/media', icon: ImageIcon, title: 'Media library', text: 'Images, clips, audio' },
-            { to: '/mail', icon: Mail, title: 'Staff mail', text: 'Send & receive per profile' },
-            { to: '/site/staff', icon: Users, title: 'Staff directory', text: 'Emails & contacts' },
-            { to: '/breaking', icon: Youtube, title: 'Front page', text: 'Main headline & crawl' },
-          ].map(({ to, icon: Icon, title, text }) => (
-            <li key={to} className="bg-paper">
-              <Link to={to} className="flex gap-3 p-4 transition-colors hover:bg-navy-tint">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center bg-navy-tint text-navy">
-                  <Icon className="h-5 w-5" aria-hidden />
-                </span>
-                <span className="min-w-0">
-                  <span className="block font-extrabold text-ink">{title}</span>
-                  <span className="block text-sm text-muted">{text}</span>
-                </span>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </Card>
-
       <ul className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
         {[
           { label: 'Total articles', value: c.total, to: '/articles', sub: `${fmtNum(c.published)} live on the site`, icon: FileText, rule: 'bg-ink' },
           { label: 'Drafts', value: c.draft, to: '/articles?status=draft', sub: `${fmtNum(c.review)} more in review`, icon: PenLine, rule: 'bg-off' },
           { label: 'Published today', value: data.publishedToday, to: '/articles?status=published', sub: `${fmtNum(data.publishedWeek)} in the last 7 days`, icon: CheckCircle2, rule: 'bg-emerald-600' },
-          { label: 'Reads today', value: data.traffic.today, href: '#traffic', sub: delta === 0 ? 'Same as yesterday' : delta > 0 ? `↑ ${fmtNum(delta)} vs yesterday` : `↓ ${fmtNum(Math.abs(delta))} vs yesterday`, icon: Eye, rule: 'bg-navy' },
+          { label: 'Reads today', value: data.traffic.today, to: '/analytics', sub: delta === 0 ? 'Same as yesterday' : delta > 0 ? `↑ ${fmtNum(delta)} vs yesterday` : `↓ ${fmtNum(Math.abs(delta))} vs yesterday`, icon: Eye, rule: 'bg-navy' },
         ].map((s) => {
           const Icon = s.icon;
           const inner = (
-            <div className="relative overflow-hidden border border-line bg-paper p-4 shadow-sm">
+            <div className="relative overflow-hidden rounded-xl border border-line bg-paper p-4 shadow-[0_1px_2px_rgba(20,22,27,0.04)] transition-shadow hover:shadow-md">
               <div className={`absolute top-0 left-0 h-1 w-full ${s.rule}`} />
               <div className="flex items-start justify-between gap-2">
                 <p className="text-sm font-bold text-muted">{s.label}</p>
@@ -214,14 +194,33 @@ export default function Dashboard() {
           );
           return (
             <li key={s.label}>
-              {'to' in s && s.to ? <Link to={s.to}>{inner}</Link> : <a href="#traffic">{inner}</a>}
+              <Link to={s.to}>{inner}</Link>
             </li>
           );
         })}
       </ul>
 
+      <Card className="mb-6">
+        <CardHead title="Content pipeline" note="Every story by where it stands" />
+        <div className="grid grid-cols-2 gap-px bg-line sm:grid-cols-5">
+          {([
+            { key: 'draft', rule: 'bg-off' },
+            { key: 'review', rule: 'bg-amber-500' },
+            { key: 'scheduled', rule: 'bg-navy' },
+            { key: 'published', rule: 'bg-emerald-600' },
+            { key: 'hidden', rule: 'bg-brand' },
+          ] as const).map(({ key: k, rule }) => (
+            <Link key={k} to={`/articles?status=${k}`} className="relative overflow-hidden bg-paper p-4 hover:bg-wash">
+              <div className={`absolute top-0 left-0 h-1 w-full ${rule}`} />
+              <p className="text-sm font-bold capitalize text-muted">{k}</p>
+              <p className="mt-1 text-2xl font-extrabold text-ink tabular-nums">{fmtNum(c[k] || 0)}</p>
+            </Link>
+          ))}
+        </div>
+      </Card>
+
       <div className="mb-6 grid items-start gap-6 lg:grid-cols-2">
-        <Card className="border-t-4 border-t-brand">
+        <Card>
           <CardHead title="Breaking news" note="Crawl line and front-page placements" />
           <div className="space-y-4 p-5">
             <label className="block">
@@ -275,16 +274,7 @@ export default function Dashboard() {
           </div>
         </Card>
 
-        <div id="traffic">
         <Card>
-          <CardHead title="Traffic snapshot" note="Reads counted when a story is opened" />
-          <div className="p-5">
-            <p className="text-4xl font-extrabold text-navy tabular-nums">{fmtNum(data.traffic.today)}</p>
-            <p className="mt-1 text-sm text-muted">reads today · {fmtNum(data.traffic.yesterdaySameTime)} by this time yesterday</p>
-            <Link to="/analytics" className="mt-4 inline-block text-sm font-bold text-navy hover:underline">
-              Open analytics →
-            </Link>
-          </div>
           <CardHead title="Coming up" note="Scheduled stories" />
           {data.upcoming.length === 0 ? (
             <p className="px-5 py-6 text-sm text-muted">Nothing is scheduled.</p>
@@ -305,23 +295,46 @@ export default function Dashboard() {
               ))}
             </ul>
           )}
+          <div className="border-t border-line px-5 py-3">
+            <Link to="/scheduled" className="text-sm font-bold text-navy hover:underline">
+              See the full schedule →
+            </Link>
+          </div>
         </Card>
-        </div>
+      </div>
+
+      <div className="mb-6 grid items-start gap-6 lg:grid-cols-[1.6fr_1fr]">
+        <Card>
+          <CardHead title="7-day traffic" note="Reads, page visits & ad clicks" />
+          {trends.data?.daily?.length ? (
+            <TrendChart
+              labels={trends.data.daily.map((d) => d.date)}
+              series={[
+                { key: 'reads', label: 'Story reads', color: '#890303', fill: 'rgba(137,3,3,0.14)', values: trends.data.daily.map((d) => d.reads) },
+                { key: 'visits', label: 'Page visits', color: '#030689', fill: 'rgba(3,6,137,0.10)', values: trends.data.daily.map((d) => d.visits) },
+                { key: 'adClicks', label: 'Ad clicks', color: '#0d9488', fill: 'rgba(13,148,136,0.14)', values: trends.data.daily.map((d) => d.adClicks) },
+              ]}
+              height={180}
+            />
+          ) : (
+            <p className="px-5 py-6 text-[15px] text-muted">No activity recorded yet.</p>
+          )}
+          <div className="border-t border-line px-5 py-3">
+            <Link to="/analytics" className="text-sm font-bold text-navy hover:underline">
+              Open full analytics →
+            </Link>
+          </div>
+        </Card>
+
+        <Card>
+          <CardHead title="Newsroom activity" note="Publishes, reviews, comments & mail" />
+          <div className="max-h-[260px] overflow-y-auto">
+            <ActivityTimeline events={trends.data?.timeline || []} />
+          </div>
+        </Card>
       </div>
 
       <Card>
-        <CardHead title="Content pipeline" note="Every story by where it stands" />
-        <div className="grid grid-cols-2 gap-px bg-line sm:grid-cols-5">
-          {(['draft', 'review', 'scheduled', 'published', 'hidden'] as const).map((k) => (
-            <Link key={k} to={`/articles?status=${k}`} className="bg-paper p-4 hover:bg-wash">
-              <p className="text-sm font-bold capitalize text-muted">{k}</p>
-              <p className="mt-1 text-2xl font-extrabold text-ink tabular-nums">{fmtNum(c[k] || 0)}</p>
-            </Link>
-          ))}
-        </div>
-      </Card>
-
-      <Card className="mt-6">
         <CardHead title="Recently updated" />
         <ul className="divide-y divide-line">
           {data.recent.map((a) => (

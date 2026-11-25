@@ -116,7 +116,7 @@ export default function Login() {
         <div aria-hidden className="absolute inset-x-0 top-0 h-1.5 bg-brand" />
 
         <div className="relative">
-          <span className="inline-block bg-paper px-4 py-3">
+          <span className="inline-block rounded-lg bg-paper px-4 py-3">
             <Logo />
           </span>
         </div>
@@ -140,7 +140,7 @@ export default function Login() {
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.4, delay: 0.2 + i * 0.1, ease: 'easeOut' }}
               >
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center bg-white/10">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/10">
                   <Icon className="h-5 w-5" aria-hidden />
                 </span>
                 <span>
@@ -151,13 +151,13 @@ export default function Login() {
             ))}
           </ul>
 
-          <div className="mt-10 border border-white/15 bg-white/5 p-4">
+          <div className="mt-10 rounded-xl border border-white/15 bg-white/5 p-4">
             <p className="text-[11px] font-black tracking-[0.1em] text-brand-bright uppercase">Full control of the news app</p>
             <ul className="mt-3 flex flex-wrap gap-2">
               {controlFeatures.map(({ icon: Icon, label }) => (
                 <li
                   key={label}
-                  className="inline-flex items-center gap-1.5 bg-white/10 px-2.5 py-1.5 text-[13px] font-bold text-white"
+                  className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1.5 text-[13px] font-bold text-white"
                 >
                   <Icon className="h-3.5 w-3.5 text-brand-bright" aria-hidden />
                   {label}
@@ -192,7 +192,7 @@ export default function Login() {
             </p>
 
             {alertMsg && (
-              <div role="alert" className="mt-5 border-l-4 border-brand bg-brand-tint px-4 py-3 text-[15px] font-semibold text-ink">
+              <div role="alert" className="mt-5 rounded-lg border-l-4 border-brand bg-brand-tint px-4 py-3 text-[15px] font-semibold text-ink">
                 {alertMsg}
                 {status === 'error' && (
                   <button type="button" onClick={retry} className="ml-2 cursor-pointer font-bold text-navy underline">
@@ -229,7 +229,7 @@ export default function Login() {
                     aria-invalid={!!fields.password}
                     aria-describedby={fields.password ? 'login-password-error' : undefined}
                     className={cn(
-                      'h-11 w-full border border-line-strong bg-paper px-3.5 pr-12 text-base text-ink outline-none focus:border-navy focus:ring-2 focus:ring-navy/20',
+                      'h-11 w-full rounded-lg border border-line-strong bg-paper px-3.5 pr-12 text-base text-ink outline-none focus:border-navy focus:ring-2 focus:ring-navy/15',
                       fields.password && 'border-brand'
                     )}
                   />
@@ -270,7 +270,7 @@ export default function Login() {
               Sign in with Google
             </Button>
 
-            <div className="mt-6 border border-line bg-paper p-4 text-sm">
+            <div className="mt-6 rounded-xl border border-line bg-paper p-4 text-sm">
               <p className="font-bold text-ink">Owner desk account</p>
               <p className="mt-1 text-[13.5px] text-muted">
                 Kabelo Zwelibuyile Hlongwane — full publish, layout, ads, analytics and media access.

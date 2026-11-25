@@ -17,12 +17,12 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    <div className="mb-7 flex flex-col gap-3 border-b border-line pb-5 sm:flex-row sm:items-end sm:justify-between">
       <div className="min-w-0">
         {eyebrow && (
-          <p className="mb-1 text-xs font-bold uppercase tracking-[0.08em] text-navy">{eyebrow}</p>
+          <p className="mb-1.5 text-xs font-bold uppercase tracking-[0.08em] text-navy">{eyebrow}</p>
         )}
-        <h1 className="text-2xl font-extrabold tracking-tight text-ink md:text-3xl">{title}</h1>
+        <h1 className="text-2xl font-extrabold tracking-tight text-ink md:text-[28px]">{title}</h1>
         {description && <p className="mt-1.5 max-w-2xl text-[15px] leading-relaxed text-muted">{description}</p>}
       </div>
       {actions && <div className="flex shrink-0 flex-wrap gap-2">{actions}</div>}
@@ -32,7 +32,7 @@ export function PageHeader({
 
 export function Card({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <section className={cn('overflow-hidden rounded-none border border-line bg-paper shadow-sm', className)}>
+    <section className={cn('glass overflow-hidden rounded-xl', className)}>
       {children}
     </section>
   );
@@ -40,8 +40,8 @@ export function Card({ children, className }: { children: ReactNode; className?:
 
 export function CardHead({ title, note }: { title: string; note?: string }) {
   return (
-    <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line px-5 py-4">
-      <h2 className="text-lg font-extrabold tracking-tight text-ink">{title}</h2>
+    <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line/70 px-5 py-4">
+      <h2 className="text-[15.5px] font-extrabold tracking-tight text-ink">{title}</h2>
       {note && <p className="text-sm text-muted">{note}</p>}
     </div>
   );
@@ -62,12 +62,12 @@ export function Button({
   icon?: ReactNode;
 }) {
   const base =
-    'inline-flex cursor-pointer items-center justify-center gap-2 font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-50';
+    'inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg font-bold transition-all disabled:cursor-not-allowed disabled:opacity-50';
   const sizes = { sm: 'h-9 px-3 text-sm', md: 'h-11 px-4 text-[15px]', lg: 'h-12 px-5 text-base' };
   const variants = {
-    primary: 'bg-brand text-white hover:bg-brand-strong',
-    navy: 'bg-navy text-white hover:bg-navy-deep',
-    outline: 'border border-line-strong bg-paper text-ink hover:bg-wash',
+    primary: 'bg-brand text-white shadow-sm hover:bg-brand-strong hover:shadow',
+    navy: 'bg-navy text-white shadow-sm hover:bg-navy-deep hover:shadow',
+    outline: 'border border-line-strong bg-paper text-ink hover:border-off hover:bg-wash',
     ghost: 'text-body hover:bg-wash hover:text-ink',
     danger: 'bg-brand-tint text-brand hover:bg-brand hover:text-white',
   };
@@ -106,7 +106,7 @@ export function Input({
       )}
       <input
         className={cn(
-          'h-11 w-full border border-line-strong bg-paper px-3.5 text-base text-ink outline-none placeholder:text-off focus:border-navy focus:ring-2 focus:ring-navy/20 disabled:bg-wash disabled:text-muted',
+          'h-11 w-full rounded-lg border border-line-strong bg-paper px-3.5 text-base text-ink outline-none placeholder:text-off focus:border-navy focus:ring-2 focus:ring-navy/15 disabled:bg-wash disabled:text-muted',
           error && 'border-brand',
           className
         )}
@@ -134,7 +134,7 @@ export function TextArea({
       {label && <span className="mb-1.5 block text-sm font-bold text-ink">{label}</span>}
       <textarea
         className={cn(
-          'w-full border border-line-strong bg-paper px-3.5 py-2.5 text-base text-ink outline-none placeholder:text-off focus:border-navy focus:ring-2 focus:ring-navy/20 disabled:bg-wash',
+          'w-full rounded-lg border border-line-strong bg-paper px-3.5 py-2.5 text-base text-ink outline-none placeholder:text-off focus:border-navy focus:ring-2 focus:ring-navy/15 disabled:bg-wash',
           error && 'border-brand',
           className
         )}
@@ -158,7 +158,7 @@ export function Select({
       {label && <span className="mb-1.5 block text-sm font-bold text-ink">{label}</span>}
       <select
         className={cn(
-          'h-11 w-full border border-line-strong bg-paper px-3 text-base text-ink outline-none focus:border-navy focus:ring-2 focus:ring-navy/20',
+          'h-11 w-full rounded-lg border border-line-strong bg-paper px-3 text-base text-ink outline-none focus:border-navy focus:ring-2 focus:ring-navy/15',
           error && 'border-brand',
           className
         )}
@@ -225,7 +225,7 @@ export function Badge({ children, tone = 'ink' }: { children: ReactNode; tone?: 
     hidden: 'bg-brand-tint text-brand',
   };
   return (
-    <span className={cn('inline-flex items-center px-2 py-0.5 text-xs font-bold uppercase tracking-wide', tones[tone] || tones.ink)}>
+    <span className={cn('inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-bold uppercase tracking-wide', tones[tone] || tones.ink)}>
       {children}
     </span>
   );
@@ -242,7 +242,7 @@ export function Spinner({ label = 'Loading' }: { label?: string }) {
 
 export function ErrorBox({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
-    <div className="border border-brand/30 bg-brand-tint px-5 py-4 text-brand">
+    <div className="rounded-xl border border-brand/30 bg-brand-tint px-5 py-4 text-brand">
       <p className="font-bold">{message}</p>
       {onRetry && (
         <button type="button" onClick={onRetry} className="mt-2 cursor-pointer text-sm font-bold underline">
@@ -267,8 +267,8 @@ export function Toast({ message, tone = 'ok' }: { message: string; tone?: 'ok' |
   return (
     <div
       className={cn(
-        'fixed right-4 bottom-4 z-50 max-w-sm border px-4 py-3 text-[15px] font-bold shadow-lg',
-        tone === 'ok' ? 'border-navy/20 bg-navy text-white' : 'border-brand bg-brand text-white'
+        'fixed right-4 bottom-4 z-50 max-w-sm rounded-xl px-4 py-3 text-[15px] font-bold text-white shadow-lg backdrop-blur-xl',
+        tone === 'ok' ? 'border border-white/15 bg-navy/85' : 'border border-white/15 bg-brand/85'
       )}
       role="status"
     >
