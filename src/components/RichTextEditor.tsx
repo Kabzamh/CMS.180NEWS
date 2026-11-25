@@ -37,6 +37,15 @@ export function RichTextEditor({
   const historyIndexRef = useRef(0);
   const debounceRef = useRef<number | null>(null);
 
+  // Paint whatever body HTML the article already has into the editor as
+  // soon as it mounts (e.g. opening an existing story to edit it) — not
+  // just on later prop changes, otherwise the frame renders empty even
+  // though `value` already holds the saved text.
+  useEffect(() => {
+    if (ref.current) ref.current.innerHTML = value || '';
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (ref.current && value !== lastValue.current && document.activeElement !== ref.current) {
       ref.current.innerHTML = value;
