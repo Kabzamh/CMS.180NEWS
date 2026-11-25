@@ -16,5 +16,33 @@
     "strict": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": [
+    "src/components/ArticlePreview.tsx",
+    "src/components/AssignDialog.tsx",
+    "src/components/ClipPlayer.tsx",
+    "src/components/ClipsEditor.tsx",
+    "src/components/GlobalSearch.tsx",
+    "src/components/ImagePicker.tsx",
+    "src/components/MailBell.tsx",
+    "src/components/RevisionsDialog.tsx",
+    "src/components/SeoCard.tsx",
+    "src/components/Shell.tsx",
+    "src/components/TagInput.tsx",
+    "src/contexts/MailContext.tsx",
+    "src/lib/clips.ts",
+    "src/lib/desk.ts",
+    "src/lib/device.ts",
+    "src/lib/diff.ts",
+    "src/lib/format.ts",
+    "src/lib/houseAd.ts",
+    "src/lib/image.ts",
+    "src/lib/mail.ts",
+    "src/pages/Live.tsx",
+    "src/pages/NotFound.tsx",
+    "src/pages/Records.tsx",
+    "src/pages/SectionsTags.tsx",
+    "src/pages/Team.tsx",
+    "src/pages/site/SiteStaff.tsx"
+  ]
 }

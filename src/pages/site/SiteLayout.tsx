@@ -45,14 +45,6 @@ export default function SiteLayout() {
             >
               Top stories
             </NavLink>
-            <NavLink
-              to="/site/staff"
-              className={({ isActive }) =>
-                `shrink-0 px-3 py-2.5 text-[13px] font-bold whitespace-nowrap ${isActive ? 'bg-brand text-white' : 'text-white/85 hover:bg-white/10'}`
-              }
-            >
-              Staff
-            </NavLink>
             {(sections.data || []).map((s) => (
               <NavLink
                 key={s.slug}
@@ -73,12 +65,40 @@ export default function SiteLayout() {
       </main>
 
       <footer className="mt-12 border-t border-line bg-navy-deep text-white">
-        <div className="mx-auto grid max-w-6xl gap-8 px-4 py-10 sm:grid-cols-3 sm:px-6">
+        <div className="mx-auto grid max-w-6xl gap-8 px-4 py-10 sm:grid-cols-2 sm:px-6 lg:grid-cols-4">
           <div>
             <p className="text-xs font-black tracking-[0.12em] text-brand-bright uppercase">180news</p>
             <p className="mt-3 text-[15px] leading-relaxed text-white/80">
               Live headlines from South African and international newsrooms — plus stories your desk publishes.
             </p>
+          </div>
+          <div>
+            <h2 className="text-sm font-black uppercase tracking-wide">Sections</h2>
+            <ul className="mt-3 space-y-1 text-[15px]">
+              <li>
+                <NavLink
+                  to="/site"
+                  end
+                  className={({ isActive }) =>
+                    `font-bold whitespace-nowrap ${isActive ? 'text-brand-bright' : 'text-white/85 hover:underline'}`
+                  }
+                >
+                  Top stories
+                </NavLink>
+              </li>
+              {(sections.data || []).map((s) => (
+                <li key={s.slug}>
+                  <NavLink
+                    to={`/site/section/${s.slug}`}
+                    className={({ isActive }) =>
+                      `font-bold whitespace-nowrap capitalize ${isActive ? 'text-brand-bright' : 'text-white/85 hover:underline'}`
+                    }
+                  >
+                    {s.label}
+                  </NavLink>
+                </li>
+              ))}
+            </ul>
           </div>
           <div>
             <h2 className="text-sm font-black uppercase tracking-wide">Contact</h2>
@@ -91,10 +111,9 @@ export default function SiteLayout() {
           <div>
             <h2 className="text-sm font-black uppercase tracking-wide">Desk</h2>
             <ul className="mt-3 space-y-1 text-[15px]">
-              <li><Link to="/site/staff" className="text-white/80 hover:underline">Staff directory</Link></li>
               <li><Link to="/" className="text-white/80 hover:underline">CMS dashboard</Link></li>
               <li><Link to="/articles" className="text-white/80 hover:underline">Articles</Link></li>
-              <li><Link to="/mail" className="text-white/80 hover:underline">Staff mail</Link></li>
+              <li><Link to="/mail" className="text-white/80 hover:underline">Mail</Link></li>
               <li><Link to="/ads" className="text-white/80 hover:underline">Ads control</Link></li>
             </ul>
           </div>

@@ -3,8 +3,11 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { api } from '../lib/api';
 import { PageHeader, Card, CardHead, Spinner, ErrorBox, fmtNum, Badge } from '../components/ui';
+import { TrendChart } from '../components/TrendChart';
+import { ActivityTimeline } from '../components/ActivityTimeline';
 
 const PERIODS = [7, 30, 90];
+const PALETTE = ['#890303', '#030689', '#0d9488', '#d97706', '#7c3aed', '#be185d', '#059669', '#2563eb'];
 
 export default function AnalyticsPage() {
   const [params, setParams] = useSearchParams();
@@ -71,6 +74,29 @@ export default function AnalyticsPage() {
             ))}
           </ul>
 
+          <div className="mb-6 grid items-start gap-6 lg:grid-cols-[1.6fr_1fr]">
+            <Card>
+              <CardHead title="Traffic timeline" note={`Reads, page visits & ad clicks · last ${days} days`} />
+              {m.daily?.length ? (
+                <TrendChart
+                  labels={m.daily.map((d: any) => d.date)}
+                  series={[
+                    { key: 'reads', label: 'Story reads', color: '#890303', fill: 'rgba(137,3,3,0.14)', values: m.daily.map((d: any) => d.reads) },
+                    { key: 'visits', label: 'Page visits', color: '#030689', fill: 'rgba(3,6,137,0.10)', values: m.daily.map((d: any) => d.visits) },
+                    { key: 'adClicks', label: 'Ad clicks', color: '#0d9488', fill: 'rgba(13,148,136,0.14)', values: m.daily.map((d: any) => d.adClicks) },
+                  ]}
+                />
+              ) : (
+                <p className="px-5 py-6 text-[15px] text-muted">No activity recorded yet for this period.</p>
+              )}
+            </Card>
+
+            <Card>
+              <CardHead title="Newsroom activity" note="Publishes, reviews, comments & mail" />
+              <ActivityTimeline events={m.timeline || []} />
+            </Card>
+          </div>
+
           <div className="mb-6 grid items-start gap-6 lg:grid-cols-2">
             <Card>
               <CardHead title="Ad performance (CPC)" note={`Impressions, clicks, CTR & spend · last ${days} days`} />
@@ -78,7 +104,7 @@ export default function AnalyticsPage() {
                 <p className="px-5 py-6 text-[15px] text-muted">No ad slots yet. Configure banners under Ads control.</p>
               ) : (
                 <ul className="divide-y divide-line">
-                  {m.adPerformance.map((b: any) => (
+                  {m.adPerformance.map((b: any, i: number) => (
                     <li key={b.id} className="flex gap-4 px-5 py-3.5">
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
@@ -91,7 +117,7 @@ export default function AnalyticsPage() {
                           {fmtNum(b.impressions ?? 0)} imps · CTR {b.ctr ?? 0}% · CPC R{b.cpc ?? 0}
                         </p>
                         <div className="mt-2 h-2 bg-wash">
-                          <div className="h-2 bg-brand" style={{ width: `${(b.clicks / maxAd) * 100}%` }} />
+                          <div className="h-2" style={{ width: `${(b.clicks / maxAd) * 100}%`, backgroundColor: PALETTE[i % PALETTE.length] }} />
                         </div>
                       </div>
                       <div className="text-right">
@@ -122,7 +148,7 @@ export default function AnalyticsPage() {
                       <div className="min-w-0 flex-1">
                         <p className="truncate font-mono text-sm font-bold text-ink">{b.path}</p>
                         <div className="mt-2 h-2 bg-wash">
-                          <div className="h-2 bg-navy" style={{ width: `${(b.hits / maxPage) * 100}%` }} />
+                          <div className="h-2" style={{ width: `${(b.hits / maxPage) * 100}%`, backgroundColor: PALETTE[i % PALETTE.length] }} />
                         </div>
                       </div>
                       <span className="font-extrabold tabular-nums text-ink">{fmtNum(b.hits)}</span>
@@ -148,7 +174,7 @@ export default function AnalyticsPage() {
                           {b.headline}
                         </Link>
                         <div className="mt-2 h-2 bg-wash">
-                          <div className="h-2 bg-navy" style={{ width: `${(b.reads / maxStory) * 100}%` }} />
+                          <div className="h-2" style={{ width: `${(b.reads / maxStory) * 100}%`, backgroundColor: PALETTE[i % PALETTE.length] }} />
                         </div>
                       </div>
                       <span className="font-extrabold tabular-nums text-ink">{fmtNum(b.reads)}</span>
@@ -165,12 +191,12 @@ export default function AnalyticsPage() {
                 <ul className="divide-y divide-line">
                   {m.byCategory
                     .filter((b: any) => b.reads > 0)
-                    .map((b: any) => (
+                    .map((b: any, i: number) => (
                       <li key={b.section} className="flex items-center gap-4 px-5 py-3.5">
                         <div className="min-w-0 flex-1">
                           <p className="font-bold capitalize text-ink">{b.section.replace(/-/g, ' ')}</p>
                           <div className="mt-2 h-2 bg-wash">
-                            <div className="h-2 bg-brand" style={{ width: `${(b.reads / maxCat) * 100}%` }} />
+                            <div className="h-2" style={{ width: `${(b.reads / maxCat) * 100}%`, backgroundColor: PALETTE[i % PALETTE.length] }} />
                           </div>
                         </div>
                         <span className="font-extrabold tabular-nums">{fmtNum(b.reads)}</span>
