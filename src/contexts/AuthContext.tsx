@@ -71,7 +71,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => {
       setSession(s);
       setUser(s?.user ?? null);
-      loadMember(s);
+      // Supabase auth callbacks run under an internal lock. Defer RPC calls so
+      // they do not re-enter the auth client and block sign-in.
+      setTimeout(() => { if (alive) void loadMember(s); }, 0);
     });
     return () => {
       alive = false;

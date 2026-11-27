@@ -43,7 +43,7 @@ export default function AssignmentsPage() {
     try {
       await api('/api/articles', {
         method: 'PUT',
-        body: { id: a.id, assigned_to: memberId ? Number(memberId) : null },
+        body: { id: a.id, revision: a.revision, assigned_to: memberId ? Number(memberId) : null },
       });
       setToast(memberId ? 'Story assigned.' : 'Assignment cleared.');
       await articles.reload(true);
@@ -60,7 +60,7 @@ export default function AssignmentsPage() {
     try {
       await api('/api/articles', {
         method: 'PUT',
-        body: { id: a.id, due_at: value ? new Date(value).toISOString() : null },
+        body: { id: a.id, revision: a.revision, due_at: value ? new Date(value).toISOString() : null },
       });
       await articles.reload(true);
     } catch (e) {

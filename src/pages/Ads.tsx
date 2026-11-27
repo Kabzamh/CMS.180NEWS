@@ -25,6 +25,7 @@ export default function AdsPage() {
   const media = useApi<MediaAsset[]>(() => api('/api/media'), []);
   const [forms, setForms] = useState<Record<number, Partial<AdSlot>>>({});
   const [busy, setBusy] = useState<number | null>(null);
+  const [settingsBusy, setSettingsBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [picker, setPicker] = useState<number | null>(null);
 
@@ -52,16 +53,20 @@ export default function AdsPage() {
 
   const adsOn = typeof settings.data?.ads_enabled === 'boolean'
     ? settings.data.ads_enabled
-    : settings.data?.ads_enabled?.enabled !== false;
+    : settings.data?.ads_enabled?.enabled === true;
 
   const toggleAds = async (v: boolean) => {
+    setSettingsBusy(true);
     try {
-      const next = await api('/api/settings', { method: 'PUT', body: { key: 'ads_enabled', value: v } });
-      settings.setData(next);
-      setToast(v ? 'Adverts are showing on the site.' : 'All adverts are switched off.');
+      const next = await api<any>('/api/settings', { method: 'PUT', body: { key: 'ads_enabled', value: v, revision: settings.data?._revisions?.ads_enabled } });
+      if (next?.key === 'ads_enabled') {
+        settings.setData((current: any) => ({...current, ads_enabled: next.value, _revisions: {...current?._revisions, ads_enabled: next.revision}}));
+      } else settings.setData(next);
+      setToast(v ? 'Adverts enabled.' : 'All adverts are switched off.');
     } catch (e) {
       setToast(errMsg(e));
     } finally {
+      setSettingsBusy(false);
       setTimeout(() => setToast(null), 3000);
     }
   };
@@ -82,7 +87,7 @@ export default function AdsPage() {
   const save = async (ad: AdSlot) => {
     setBusy(ad.id);
     try {
-      const body = { id: ad.id, ...forms[ad.id] };
+      const body = { id: ad.id, revision: ad.revision, ...forms[ad.id] };
       const saved = await api<AdSlot>('/api/ads', { method: 'PUT', body });
       list.setData((list.data || []).map((x) => (x.id === saved.id ? saved : x)));
       setToast(`${ad.slot_name} saved · ${sizeLabel(saved.width, saved.height)}.`);
@@ -139,6 +144,7 @@ export default function AdsPage() {
             label="Show adverts on the site"
             description="Master switch for every banner slot on the news app."
             checked={!!adsOn}
+            disabled={!settings.data || !!settings.error || settingsBusy}
             onChange={toggleAds}
           />
           <div className="flex flex-wrap gap-2 text-sm">

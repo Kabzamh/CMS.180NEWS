@@ -17,7 +17,7 @@ export default function BreakingPage() {
   const setPlacement = async (a: Article, placement: string, msg: string) => {
     setBusy(`${placement}-${a.id}`);
     try {
-      await api('/api/articles', { method: 'PUT', body: { id: a.id, placement } });
+      await api('/api/articles', { method: 'PUT', body: { id: a.id, revision: a.revision, placement } });
       setToast(msg);
       await list.reload(true);
     } catch (e) {

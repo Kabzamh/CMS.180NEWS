@@ -11,6 +11,7 @@ interface Block {
   enabled: boolean;
   categoryEnabled?: boolean;
   count?: number;
+  revision?: number;
 }
 
 export default function HomepagePage() {
@@ -48,7 +49,7 @@ export default function HomepagePage() {
     try {
       await api('/api/settings', {
         method: 'PUT',
-        body: { key: 'homepage', value: { blocks: blocks.map((b) => ({ id: b.id, enabled: b.enabled, count: b.count })) } },
+        body: { key: 'homepage', revision: list.data?.[0]?.revision, value: { blocks: blocks.map((b) => ({ id: b.id, enabled: b.enabled })) } },
       });
       setToast('Homepage saved.');
       await list.reload(true);

@@ -15,6 +15,8 @@ export interface TeamMember {
 
 export interface Article {
   id: number;
+  /** Supabase revision used to reject overwrites from stale editor tabs. */
+  revision?: number;
   headline: string;
   summary: string;
   body: string;
@@ -97,6 +99,7 @@ export interface MediaAsset {
 
 export interface AdSlot {
   id: number;
+  revision?: number;
   slot: string;
   slot_name: string;
   advertiser: string;

@@ -357,6 +357,13 @@ export default function Layout() {
 
             <main className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-5 lg:px-6">
               <div className={cn('mx-auto w-full', location.pathname === '/mail' ? 'max-w-[1600px]' : 'max-w-4xl')}>
+                {import.meta.env.VITE_NEWSROOM_SYNC_PREVIEW === 'true' && (
+                  <p role="status" className="mb-5 rounded-lg border border-amber-400 bg-amber-50 p-4 text-sm font-bold text-amber-950">
+                    {import.meta.env.VITE_NEWSROOM_ALLOW_WRITES === 'true'
+                      ? 'Supabase connected: story, homepage and advert changes affect the connected database. Scheduled publication is disabled; other CMS features may be unavailable.'
+                      : 'Supabase test preview — read-only. Publishing and other changes are disabled; the live CMS and news app are unchanged.'}
+                  </p>
+                )}
                 <Outlet />
               </div>
             </main>

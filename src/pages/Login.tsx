@@ -254,60 +254,26 @@ export default function Login() {
               </Button>
             </form>
 
-            <div className="my-5 flex items-center gap-3 text-sm text-muted">
-              <div className="h-px flex-1 bg-line" />
-              or
-              <div className="h-px flex-1 bg-line" />
-            </div>
+            {import.meta.env.VITE_NEWSROOM_SYNC_PREVIEW !== 'true' && (
+              <>
+                <div className="my-5 flex items-center gap-3 text-sm text-muted">
+                  <div className="h-px flex-1 bg-line" />
+                  or
+                  <div className="h-px flex-1 bg-line" />
+                </div>
+                <Button type="button" variant="outline" className="w-full" icon={<GoogleGlyph />} onClick={() => signInWithGoogle('180news Newsroom CMS')}>
+                  Sign in with Google
+                </Button>
+              </>
+            )}
 
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full"
-              icon={<GoogleGlyph />}
-              onClick={() => signInWithGoogle('180news Newsroom CMS')}
-            >
-              Sign in with Google
-            </Button>
-
-            <div className="mt-6 rounded-xl border border-line bg-paper p-4 text-sm">
-              <p className="font-bold text-ink">Owner desk account</p>
-              <p className="mt-1 text-[13.5px] text-muted">
-                Kabelo Zwelibuyile Hlongwane — full publish, layout, ads, analytics and media access.
+            {import.meta.env.VITE_NEWSROOM_SYNC_PREVIEW === 'true' && (
+              <p className="mt-6 rounded-xl border border-line bg-paper p-4 text-sm font-bold text-ink">
+                {import.meta.env.VITE_NEWSROOM_ALLOW_WRITES === 'true'
+                  ? 'Supabase connected. Story, homepage and advert changes affect the connected database.'
+                  : 'Supabase connection preview: read-only. The public newsroom and live CMS are unchanged.'}
               </p>
-              <dl className="mt-2 space-y-1 text-[13.5px]">
-                <div className="flex gap-2">
-                  <dt className="w-20 text-muted">Owner</dt>
-                  <dd className="font-bold text-ink">Kabelo Zwelibuyile Hlongwane</dd>
-                </div>
-                <div className="flex gap-2">
-                  <dt className="w-20 text-muted">Sign-in</dt>
-                  <dd className="font-bold break-all text-ink">owner@180news.co.za</dd>
-                </div>
-                <div className="flex gap-2">
-                  <dt className="w-20 text-muted">Contact</dt>
-                  <dd className="font-bold break-all text-ink">zweli@180news.co.za</dd>
-                </div>
-                <div className="flex gap-2">
-                  <dt className="w-20 text-muted">Password</dt>
-                  <dd className="font-bold text-ink">newsroom180</dd>
-                </div>
-              </dl>
-              <Button
-                type="button"
-                variant="navy"
-                size="sm"
-                className="mt-3"
-                onClick={() => {
-                  setEmail('owner@180news.co.za');
-                  setPassword('newsroom180');
-                  setFields({});
-                  setError(null);
-                }}
-              >
-                Fill these in
-              </Button>
-            </div>
+            )}
 
             <p className="mt-6 text-center text-sm text-muted lg:hidden">
               <Link to="/site" className="font-bold text-navy hover:underline">

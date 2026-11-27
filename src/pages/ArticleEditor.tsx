@@ -69,13 +69,14 @@ function fromArticle(a: Article): FormState {
     when: a.status === 'scheduled' ? 'later' : 'now',
     publish_local:
       a.status === 'scheduled' && a.publish_at
-        ? new Date(a.publish_at).toISOString().slice(0, 16)
+        ? toLocalInputValue(new Date(a.publish_at))
         : '',
     media: a.media ?? [],
   };
 }
 
 function toLocalInputValue(d = new Date()) {
+  if (Number.isNaN(d.getTime())) return '';
   const off = d.getTimezoneOffset();
   const local = new Date(d.getTime() - off * 60000);
   return local.toISOString().slice(0, 16);
@@ -167,7 +168,9 @@ export default function ArticleEditor() {
           ? new Date(form.publish_local).toISOString()
           : null
         : status === 'published'
-          ? article?.publish_at || new Date().toISOString()
+          ? article?.status === 'published' && article.publish_at
+            ? article.publish_at
+            : new Date().toISOString()
           : article?.publish_at || null;
     return {
       headline: form.headline.trim(),
@@ -197,9 +200,10 @@ export default function ArticleEditor() {
     setSaving(true);
     try {
       const body = buildPayload(status);
-      const saved = isNew || !article
+      if (!isNew && !article) throw new Error('Story is not loaded. Reload before saving.');
+      const saved = isNew
         ? await api<Article>('/api/articles', { method: 'POST', body })
-        : await api<Article>('/api/articles', { method: 'PUT', body: { id: article.id, ...body } });
+        : await api<Article>('/api/articles', { method: 'PUT', body: { id: article!.id, revision: article!.revision, ...body } });
       setArticle(saved);
       setForm(fromArticle(saved));
       const msgs: Record<string, string> = {
@@ -1045,11 +1049,13 @@ export default function ArticleEditor() {
                   type="button"
                   size="sm"
                   variant={form.when === 'later' ? 'navy' : 'outline'}
+                  disabled={import.meta.env.VITE_NEWSROOM_SYNC_PREVIEW === 'true'}
                   onClick={() => set({ when: 'later', publish_local: form.publish_local || toLocalInputValue(new Date(Date.now() + 3600000)) })}
                 >
                   Later
                 </Button>
               </div>
+              {import.meta.env.VITE_NEWSROOM_SYNC_PREVIEW === 'true' && <p className="mb-2 text-sm text-muted">Automatic scheduled publication is not enabled. Publish manually instead.</p>}
               {form.when === 'later' && (
                 <Input
                   type="datetime-local"
@@ -1070,7 +1076,7 @@ export default function ArticleEditor() {
               Send for review
             </Button>
             {form.when === 'later' ? (
-              <Button className="w-full" variant="navy" loading={saving} icon={<Clock className="h-4 w-4" />} onClick={() => save('scheduled')}>
+              <Button className="w-full" variant="navy" loading={saving} disabled={import.meta.env.VITE_NEWSROOM_SYNC_PREVIEW === 'true'} icon={<Clock className="h-4 w-4" />} onClick={() => save('scheduled')}>
                 Schedule
               </Button>
             ) : (

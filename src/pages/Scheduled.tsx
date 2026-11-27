@@ -17,7 +17,7 @@ export default function ScheduledPage() {
   const act = async (a: Article, body: Record<string, unknown>, msg: string) => {
     setBusy(a.id);
     try {
-      await api('/api/articles', { method: 'PUT', body: { id: a.id, ...body } });
+      await api('/api/articles', { method: 'PUT', body: { id: a.id, revision: a.revision, ...body } });
       setToast(msg);
       await list.reload(true);
     } catch (e) {

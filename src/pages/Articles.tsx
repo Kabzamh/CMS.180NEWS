@@ -51,7 +51,7 @@ export default function Articles() {
   const setStatus = async (a: Article, st: string) => {
     setBusy(a.id);
     try {
-      await api('/api/articles', { method: 'PUT', body: { id: a.id, status: st } });
+      await api('/api/articles', { method: 'PUT', body: { id: a.id, revision: a.revision, status: st, ...(st === 'published' && a.status !== 'published' ? { publish_at: new Date().toISOString() } : {}) } });
       setToast({ msg: st === 'published' ? 'Published. It is live on the site feed.' : 'Hidden from the site.' });
       await list.reload(true);
     } catch (e) {

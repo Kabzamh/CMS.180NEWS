@@ -1,5 +1,6 @@
 import supabase from './supabase';
 import { mockRequest } from './mockApi';
+import { newsroomReadPreview } from './newsroomReadPreview';
 
 export class ApiError extends Error {
   status: number;
@@ -51,6 +52,16 @@ function notifySiteChangedIfNeeded(path: string, method: string) {
 // src/lib/localStore.ts for the seed data and src/lib/mockApi.ts for the
 // route handlers.
 export async function api<T = unknown>(path: string, opts: { method?: string; body?: unknown } = {}): Promise<T> {
+  if (import.meta.env.VITE_NEWSROOM_SYNC_PREVIEW === 'true') {
+    // Explicit opt-in only. This points at real Supabase data, even on a Vercel preview.
+    const allowWrites = import.meta.env.VITE_NEWSROOM_ALLOW_WRITES === 'true';
+    const preview = await newsroomReadPreview(opts.method ?? 'GET', path, opts.body, allowWrites);
+    if (preview.status < 200 || preview.status >= 300) {
+      const body = (preview.body ?? {}) as { error?: string };
+      throw new ApiError(body.error || 'Preview request failed', preview.status);
+    }
+    return preview.body as T;
+  }
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token ?? null;
   const method = opts.method ?? 'GET';

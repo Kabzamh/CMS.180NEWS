@@ -5,8 +5,9 @@
 // token kept in localStorage. AuthContext.tsx and googleAuth.ts talk to
 // this object exactly as they would the real `@supabase/supabase-js`
 // client, so neither file needed to change.
-import type { Session, User } from '@supabase/supabase-js';
+import type { Session, User, SupabaseClient } from '@supabase/supabase-js';
 import { getStore, save } from './localStore';
+import { newsroomClient } from './newsroomReal';
 
 const SESSION_KEY = 'cms180_demo_session_v1';
 
@@ -98,4 +99,9 @@ const auth = {
   },
 };
 
-export default { auth };
+// The existing demo remains the default. The Supabase integration is staged
+// behind an explicit, read-only preview flag until every required feature is ready.
+const selected = import.meta.env.VITE_NEWSROOM_SYNC_PREVIEW === 'true'
+  ? newsroomClient()
+  : ({ auth } as unknown as SupabaseClient);
+export default selected;
