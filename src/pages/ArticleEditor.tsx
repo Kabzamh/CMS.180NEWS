@@ -11,6 +11,7 @@ import {
   PageHeader, Card, CardHead, Button, Input, TextArea, Select, Spinner, ErrorBox, Toast, Badge,
 } from '../components/ui';
 import { RichTextEditor } from '../components/RichTextEditor';
+import { deviceTimeZone, parseFutureLocalTime } from '../lib/scheduleTime';
 import { MediaPlayer, parseYouTubeId } from '../components/MediaPlayer';
 import { getSpeechRecognition, type SpeechRecognitionLike } from '../lib/speech';
 import type { Article, ArticleStatus, MediaAsset, MediaEmbed, Placement, Section, TranscriptSegment } from '../lib/types';
@@ -163,12 +164,10 @@ export default function ArticleEditor() {
 
   const set = (patch: Partial<FormState>) => setForm((f) => ({ ...f, ...patch }));
 
-  const buildPayload = (status: ArticleStatus) => {
+  const buildPayload = (status: ArticleStatus, scheduledAt?: string) => {
     const publish_at =
       status === 'scheduled'
-        ? form.publish_local
-          ? new Date(form.publish_local).toISOString()
-          : null
+        ? scheduledAt || null
         : status === 'published'
           ? article?.status === 'published' && article.publish_at
             ? article.publish_at
@@ -192,16 +191,23 @@ export default function ArticleEditor() {
   };
 
   const save = async (status: ArticleStatus) => {
+    // This client guard does not replace server-side authorization.
+    if (status === 'scheduled' && connected) {
+      setToast('Automatic scheduling is not enabled.');
+      setTimeout(() => setToast(null), 3500);
+      return;
+    }
     const f: Record<string, string> = {};
     if (form.headline.trim().length < 4) f.headline = 'Give the story a headline (at least 4 characters).';
     if (status !== 'draft' && !form.section) f.section = 'Choose a category before leaving draft.';
-    if (status === 'scheduled' && !form.publish_local) f.publish_local = 'Pick a date and time to schedule.';
+    const scheduledTime = status === 'scheduled' ? parseFutureLocalTime(form.publish_local) : null;
+    if (scheduledTime && !scheduledTime.ok) f.publish_local = scheduledTime.error;
     setFields(f);
     if (Object.keys(f).length) return;
 
     setSaving(true);
     try {
-      const body = buildPayload(status);
+      const body = buildPayload(status, scheduledTime?.ok ? scheduledTime.iso : undefined);
       if (!isNew && !article) throw new Error('Story is not loaded. Reload before saving.');
       const saved = isNew
         ? await api<Article>('/api/articles', { method: 'POST', body })
@@ -1059,14 +1065,21 @@ export default function ArticleEditor() {
                 </Button>
               </div>
               {import.meta.env.VITE_NEWSROOM_SYNC_PREVIEW === 'true' && <p className="mb-2 text-sm text-muted">Automatic scheduled publication is not enabled. Publish manually instead.</p>}
+              <p className="mb-2 text-xs text-muted">Time zone: {deviceTimeZone()} (your device).</p>
               {form.when === 'later' && (
-                <Input
-                  type="datetime-local"
-                  label="Schedule for"
-                  value={form.publish_local}
-                  onChange={(e) => set({ publish_local: e.target.value })}
-                  error={fields.publish_local}
-                />
+                <div>
+                  <Input
+                    type="datetime-local"
+                    label="Schedule for"
+                    value={form.publish_local}
+                    onChange={(e) => set({ publish_local: e.target.value })}
+                    error={fields.publish_local}
+                  />
+                  {(() => {
+                    const preview = parseFutureLocalTime(form.publish_local);
+                    return preview.ok ? <p className="mt-1 text-xs text-muted">UTC: {new Date(preview.iso).toUTCString()}</p> : null;
+                  })()}
+                </div>
               )}
             </div>
           </Card>
