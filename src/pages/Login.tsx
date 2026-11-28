@@ -97,6 +97,15 @@ export default function Login() {
   };
 
   const alertMsg = error || (status === 'error' ? authError : null);
+  const connectedPreview = import.meta.env.VITE_NEWSROOM_SYNC_PREVIEW === 'true';
+  const shownPerks = connectedPreview
+    ? [
+        { icon: FilePen, title: 'Newsroom stories', text: 'Read stories from the connected newsroom. Saving depends on the configuration and your role.' },
+        { icon: CalendarClock, title: 'Scheduling unavailable', text: 'Automatic scheduled publication is not enabled yet.' },
+        { icon: Users, title: 'Secure sign-in', text: 'Access requires an authorised newsroom account.' },
+      ]
+    : deskPerks;
+  const shownFeatures = connectedPreview ? controlFeatures.slice(0, 3) : controlFeatures;
 
   return (
     <div className="relative min-h-dvh bg-navy-deep text-white lg:grid lg:grid-cols-2">
@@ -132,7 +141,7 @@ export default function Login() {
             Every story, one desk.
           </h1>
           <ul className="mt-10 space-y-6">
-            {deskPerks.map(({ icon: Icon, title, text }, i) => (
+            {shownPerks.map(({ icon: Icon, title, text }, i) => (
               <motion.li
                 key={title}
                 className="flex gap-4"
@@ -152,9 +161,9 @@ export default function Login() {
           </ul>
 
           <div className="mt-10 rounded-xl border border-white/15 bg-white/5 p-4">
-            <p className="text-[11px] font-black tracking-[0.1em] text-brand-bright uppercase">Full control of the news app</p>
+            <p className="text-[11px] font-black tracking-[0.1em] text-brand-bright uppercase">{connectedPreview ? 'Connected newsroom' : 'Full control of the news app'}</p>
             <ul className="mt-3 flex flex-wrap gap-2">
-              {controlFeatures.map(({ icon: Icon, label }) => (
+              {shownFeatures.map(({ icon: Icon, label }) => (
                 <li
                   key={label}
                   className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1.5 text-[13px] font-bold text-white"
@@ -165,7 +174,9 @@ export default function Login() {
               ))}
             </ul>
             <p className="mt-3 text-[14px] leading-relaxed text-white/70">
-              After sign-in you can publish your own articles, set homepage layout and ads, track analytics, and load YouTube, short videos and audio into any story.
+              {connectedPreview
+                ? 'Story, homepage and advert changes are available only when writes are enabled and your account is authorised. Other features are still being connected.'
+                : 'After sign-in you can publish your own articles, set homepage layout and ads, track analytics, and load YouTube, short videos and audio into any story.'}
             </p>
           </div>
         </motion.div>
@@ -271,7 +282,7 @@ export default function Login() {
               <p className="mt-6 rounded-xl border border-line bg-paper p-4 text-sm font-bold text-ink">
                 {import.meta.env.VITE_NEWSROOM_ALLOW_WRITES === 'true'
                   ? 'Supabase connected. Story, homepage and advert changes affect the connected database.'
-                  : 'Supabase connection preview: read-only. The public newsroom and live CMS are unchanged.'}
+                  : 'Supabase connected. This interface is currently read-only.'}
               </p>
             )}
 

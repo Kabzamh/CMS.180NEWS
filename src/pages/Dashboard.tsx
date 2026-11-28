@@ -10,6 +10,7 @@ import { PageHeader, Card, CardHead, Spinner, ErrorBox, Badge, Button, fmtDate, 
 import { TrendChart } from '../components/TrendChart';
 import { ActivityTimeline } from '../components/ActivityTimeline';
 import type { Article } from '../lib/types';
+import NewsroomDashboard from './NewsroomDashboard';
 
 interface DashAnalytics {
   days: number;
@@ -52,6 +53,11 @@ function formatDeskClock(d: Date) {
 }
 
 export default function Dashboard() {
+  if (import.meta.env.VITE_NEWSROOM_SYNC_PREVIEW === 'true') return <NewsroomDashboard />;
+  return <LegacyDashboard />;
+}
+
+function LegacyDashboard() {
   const { member } = useAuth();
   const editor = member?.role === 'owner' || member?.role === 'editor';
   const { data, loading, error, reload } = useApi<DashData>(
