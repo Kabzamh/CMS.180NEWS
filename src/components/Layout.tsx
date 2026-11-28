@@ -124,6 +124,8 @@ function LiveNewsPreview({ reloadKey }: { reloadKey: number }) {
 
 export default function Layout() {
   const { member, signOut } = useAuth();
+  const connected = import.meta.env.VITE_NEWSROOM_SYNC_PREVIEW === 'true';
+  const availableRoutes = new Set(['/', '/articles', '/homepage', '/ads']);
   const location = useLocation();
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(0);
@@ -256,7 +258,7 @@ export default function Layout() {
                       >
                         <Icon className="h-[17px] w-[17px] shrink-0" aria-hidden />
                         <span className="min-w-0 flex-1 leading-snug">{it.label}</span>
-                        {badgeFor(it.to)}
+                        {connected && !availableRoutes.has(it.to) ? <span className="text-xs opacity-70">Unavailable</span> : badgeFor(it.to)}
                       </NavLink>
                     </li>
                   );
@@ -268,13 +270,15 @@ export default function Layout() {
       </nav>
 
       <div className="space-y-0.5 border-t border-line/60 p-2.5">
-        <Link
-          to="/site"
-          onClick={() => setOpen(false)}
-          className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-[14.5px] font-semibold text-navy hover:bg-navy-tint"
-        >
-          <ExternalLink className="h-[17px] w-[17px]" /> Open news app
-        </Link>
+        {connected ? (
+          <a href="https://www.180news.co.za/" target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-[14.5px] font-semibold text-navy hover:bg-navy-tint">
+            <ExternalLink className="h-[17px] w-[17px]" /> Open live news site
+          </a>
+        ) : (
+          <Link to="/site" onClick={() => setOpen(false)} className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-[14.5px] font-semibold text-navy hover:bg-navy-tint">
+            <ExternalLink className="h-[17px] w-[17px]" /> Open news app
+          </Link>
+        )}
         <button
           type="button"
           onClick={() => signOut()}
@@ -327,9 +331,9 @@ export default function Layout() {
                 <p className="mr-auto truncate text-sm text-muted">
                   <span className="font-bold text-ink">180news CMS</span>
                   <span className="mx-2 text-line-strong">·</span>
-                  Edit while the live app updates beside you
+                  {connected ? 'Connected newsroom' : 'Edit while the live app updates beside you'}
                 </p>
-                <button
+                {!connected && <button
                   type="button"
                   className="hidden cursor-pointer items-center gap-1.5 text-sm font-bold text-navy hover:underline lg:inline-flex"
                   onClick={() => setPreviewOn((v) => !v)}
@@ -343,10 +347,10 @@ export default function Layout() {
                       <PanelRightOpen className="h-4 w-4" /> Show live
                     </>
                   )}
-                </button>
-                <Button size="sm" variant="outline" className="h-8" onClick={refreshPreview} icon={<RefreshCw className="h-3.5 w-3.5" />}>
+                </button>}
+                {!connected && <Button size="sm" variant="outline" className="h-8" onClick={refreshPreview} icon={<RefreshCw className="h-3.5 w-3.5" />}>
                   Refresh live
-                </Button>
+                </Button>}
                 <Link to="/articles/new">
                   <Button size="sm" className="h-8" icon={<PenLine className="h-3.5 w-3.5" />}>
                     New story
@@ -364,7 +368,14 @@ export default function Layout() {
                       : 'Supabase test preview — read-only. Publishing and other changes are disabled; the live CMS and news app are unchanged.'}
                   </p>
                 )}
-                <Outlet />
+                {connected && !(
+                  location.pathname === '/' || location.pathname === '/articles' || location.pathname.startsWith('/articles/') || location.pathname === '/homepage' || location.pathname === '/ads'
+                ) ? (
+                  <div className="rounded-xl border border-line bg-paper p-6">
+                    <h1 className="text-xl font-extrabold text-ink">This feature is not connected yet</h1>
+                    <p className="mt-2 text-sm text-muted">This page is unavailable in the connected newsroom. Stories, homepage sections and existing advert controls remain available according to your role.</p>
+                  </div>
+                ) : <Outlet />}
               </div>
             </main>
           </div>

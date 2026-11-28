@@ -9,6 +9,8 @@ import type { Article, Section, Author } from '../lib/types';
 
 export default function Articles() {
   const { member } = useAuth();
+  const connected = import.meta.env.VITE_NEWSROOM_SYNC_PREVIEW === 'true';
+  const canPublish = !connected || member?.role === 'owner' || member?.role === 'editor';
   const [params, setParams] = useSearchParams();
   const status = params.get('status') || '';
   const section = params.get('section') || '';
@@ -86,7 +88,7 @@ export default function Articles() {
       <PageHeader
         eyebrow="Desk"
         title="Articles"
-        description="Write, review, schedule and publish stories for the 180news front page."
+        description={connected ? 'Write, review and publish stories. Automatic scheduling and deletion are not yet available.' : 'Write, review, schedule and publish stories for the 180news front page.'}
         actions={
           <Link to="/articles/new">
             <Button icon={<PenLine className="h-4 w-4" />}>New story</Button>
@@ -161,19 +163,19 @@ export default function Articles() {
                   <Link to={`/articles/${a.id}`}>
                     <Button size="sm" variant="outline">Edit</Button>
                   </Link>
-                  {a.status !== 'published' && (member?.role !== 'writer' || a.status === 'draft') && (
+                  {canPublish && a.status !== 'published' && (member?.role !== 'writer' || a.status === 'draft') && (
                     <Button size="sm" variant="navy" loading={busy === a.id} onClick={() => setStatus(a, 'published')}>
                       Publish
                     </Button>
                   )}
-                  {a.status === 'published' && (
+                  {canPublish && a.status === 'published' && (
                     <Button size="sm" variant="outline" loading={busy === a.id} onClick={() => setStatus(a, 'hidden')}>
                       Hide
                     </Button>
                   )}
-                  <Button size="sm" variant="danger" icon={<Trash2 className="h-3.5 w-3.5" />} onClick={() => setDelId(a.id)}>
+                  {!connected && <Button size="sm" variant="danger" icon={<Trash2 className="h-3.5 w-3.5" />} onClick={() => setDelId(a.id)}>
                     Delete
-                  </Button>
+                  </Button>}
                 </div>
               </li>
             ))}

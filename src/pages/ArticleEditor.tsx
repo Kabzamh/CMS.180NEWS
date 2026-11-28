@@ -87,6 +87,8 @@ export default function ArticleEditor() {
   const isNew = !id || id === 'new';
   const nav = useNavigate();
   const { member } = useAuth();
+  const connected = import.meta.env.VITE_NEWSROOM_SYNC_PREVIEW === 'true';
+  const canPublish = !connected || member?.role === 'owner' || member?.role === 'editor';
   const [form, setForm] = useState<FormState>(() => empty(member?.name || ''));
   const [article, setArticle] = useState<Article | null>(null);
   const [loading, setLoading] = useState(!isNew);
@@ -556,7 +558,7 @@ export default function ArticleEditor() {
   // apps without a server-side Graph API integration), plus a ready-made
   // caption staff can paste straight into a Facebook post or WhatsApp
   // status update.
-  const storyShareUrl = article ? `${window.location.origin}/site/story/${article.id}` : '';
+  const storyShareUrl = article ? (connected ? `https://www.180news.co.za/story/${article.id}` : `${window.location.origin}/site/story/${article.id}`) : '';
   const shareCaption = article
     ? [article.headline, article.summary, storyShareUrl].filter(Boolean).join('\n\n')
     : '';
@@ -649,14 +651,15 @@ export default function ArticleEditor() {
                 <p className="text-sm text-muted">No image yet.</p>
               )}
               <div className="flex flex-wrap gap-2">
-                <label className="inline-flex h-11 cursor-pointer items-center gap-2 border border-line-strong bg-paper px-4 text-[15px] font-bold hover:bg-wash">
+                {!connected && <label className="inline-flex h-11 cursor-pointer items-center gap-2 border border-line-strong bg-paper px-4 text-[15px] font-bold hover:bg-wash">
                   <ImagePlus className="h-4 w-4" /> Upload
                   <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && onUpload(e.target.files[0])} />
-                </label>
+                </label>}
                 <Button type="button" variant="outline" onClick={() => { media.reload(); setPicker('image'); }}>
                   Media library
                 </Button>
               </div>
+              {connected && <p className="text-sm text-muted">New uploads are not connected yet. You can select an existing image from the library.</p>}
               <Input label="Caption" value={form.image_caption} onChange={(e) => set({ image_caption: e.target.value })} />
               <Input label="Credit" value={form.image_credit} onChange={(e) => set({ image_credit: e.target.value })} />
             </div>
@@ -682,7 +685,7 @@ export default function ArticleEditor() {
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <label className="inline-flex h-11 cursor-pointer items-center gap-2 border border-line-strong bg-paper px-4 text-[15px] font-bold hover:bg-wash">
+                {!connected && <label className="inline-flex h-11 cursor-pointer items-center gap-2 border border-line-strong bg-paper px-4 text-[15px] font-bold hover:bg-wash">
                   <Film className="h-4 w-4" /> {clipUploading ? 'Uploading…' : 'Upload short video'}
                   <input
                     type="file"
@@ -691,8 +694,8 @@ export default function ArticleEditor() {
                     disabled={clipUploading}
                     onChange={(e) => e.target.files?.[0] && onClipUpload(e.target.files[0])}
                   />
-                </label>
-                <label className="inline-flex h-11 cursor-pointer items-center gap-2 border border-line-strong bg-paper px-4 text-[15px] font-bold hover:bg-wash">
+                </label>}
+                {!connected && <label className="inline-flex h-11 cursor-pointer items-center gap-2 border border-line-strong bg-paper px-4 text-[15px] font-bold hover:bg-wash">
                   <Headphones className="h-4 w-4" /> Upload audio
                   <input
                     type="file"
@@ -701,7 +704,7 @@ export default function ArticleEditor() {
                     disabled={clipUploading}
                     onChange={(e) => e.target.files?.[0] && onClipUpload(e.target.files[0])}
                   />
-                </label>
+                </label>}
                 <Button type="button" variant="outline" onClick={() => { media.reload(); setPicker('clip'); }}>
                   From library
                 </Button>
@@ -763,7 +766,7 @@ export default function ArticleEditor() {
             </div>
           </Card>
 
-          <Card>
+          {!connected && <Card>
             <CardHead title="Interview recorder" note="Record an interview, tag who's speaking, and get a clickable, editable transcript — Descript-style" />
             <div className="space-y-4 p-5">
               {!recording && !recordedUrl && (
@@ -969,7 +972,7 @@ export default function ArticleEditor() {
                 </div>
               )}
             </div>
-          </Card>
+          </Card>}
         </div>
 
         <div className="space-y-4 lg:sticky lg:top-6">
@@ -1075,7 +1078,7 @@ export default function ArticleEditor() {
             <Button className="w-full" variant="outline" loading={saving} onClick={() => save('review')}>
               Send for review
             </Button>
-            {form.when === 'later' ? (
+            {canPublish && (form.when === 'later' ? (
               <Button className="w-full" variant="navy" loading={saving} disabled={import.meta.env.VITE_NEWSROOM_SYNC_PREVIEW === 'true'} icon={<Clock className="h-4 w-4" />} onClick={() => save('scheduled')}>
                 Schedule
               </Button>
@@ -1083,14 +1086,14 @@ export default function ArticleEditor() {
               <Button className="w-full" variant="navy" loading={saving} icon={<Send className="h-4 w-4" />} onClick={() => save('published')}>
                 Publish
               </Button>
-            )}
-            {article?.status === 'published' && (
+            ))}
+            {canPublish && article?.status === 'published' && (
               <>
                 <Button className="w-full" variant="outline" loading={saving} icon={<EyeOff className="h-4 w-4" />} onClick={() => save('hidden')}>
                   Hide from site
                 </Button>
                 <a
-                  href={`/site/story/${article.id}`}
+                  href={connected ? `https://www.180news.co.za/story/${article.id}` : `/site/story/${article.id}`}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex h-11 w-full items-center justify-center border border-line-strong bg-paper text-[15px] font-bold text-navy hover:bg-wash"
@@ -1099,7 +1102,7 @@ export default function ArticleEditor() {
                 </a>
               </>
             )}
-            {article && (
+            {article && !connected && (
               <Button className="w-full" variant="danger" icon={<Trash2 className="h-4 w-4" />} onClick={() => setDelOpen(true)}>
                 Delete story
               </Button>
